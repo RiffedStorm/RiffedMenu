@@ -15,15 +15,19 @@ struct Addresses {
     uintptr_t radarTraces;        // CRadar::ms_RadarTrace[175] (0x28 each)
     uintptr_t gravity;            // float, 0 if not a fixed constant on this exe
     uintptr_t d3dDevice;          // RenderWare's IDirect3DDevice9* global
+    uintptr_t modelInfoPtrs;      // CModelInfo::ms_modelInfoPtrs[]
+    uintptr_t weaponInfo;         // aWeaponInfo[] (CWeaponInfo, 0x70 each)
 };
 
-static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28 };
+static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8 };
 // Found by disassembly of gta-sa.exe build 459558 (PE timestamp 0x547CD3A3):
 //   0x46EDD0 reads opcode at [ecx+0x14], sets NOT flag [ecx+0xD2], dispatches via table 0x914BB0
 //   0xC100D0 is the base used by 139 sites of `imul r, r, 0x190`
 //   0xC36858 = 0xC3687D - 0x25 from CRadar's free-slot scan (bInUse bit, 0x28 stride, 0x1B58 end)
 //   0xD23768 is loaded 371 times and called through vtable slots 2 (Release) / 40 (GetDepthStencilSurface)
-static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768 };
+//   0xB12818 is indexed by model id in the GIVE_VEHICLE_PAINTJOB / GET_AVAILABLE_VEHICLE_MOD handlers
+//   0xD164E8 is where the weapon.dat loader (0x5DBD10) writes entries: imul esi,esi,0x70; [esi+0xD164E8]
+static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8 };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -65,12 +69,14 @@ constexpr int offLogicalOp  = 0xD0;
 alignas(16) uint8_t g_script[kScriptSize];
 
 struct Arg {
-    enum Kind : uint8_t { Int, Float, Var } kind;
-    union { int32_t i; float f; };
+    enum Kind : uint8_t { Int, Float, Var, Str8, Str16 } kind;
+    union { int32_t i; float f; const char* s; };
 };
 Arg I(int32_t v) { Arg a; a.kind = Arg::Int;   a.i = v; return a; }
 Arg F(float v)   { Arg a; a.kind = Arg::Float; a.f = v; return a; }
 Arg V(int idx)   { Arg a; a.kind = Arg::Var;   a.i = idx; return a; }
+Arg S8(const char* s)  { Arg a; a.kind = Arg::Str8;  a.s = s; return a; }   // fixed 8-byte text label
+Arg S16(const char* s) { Arg a; a.kind = Arg::Str16; a.s = s; return a; }   // fixed 16-byte text label
 
 int32_t& VarI(int idx) { return At<int32_t>(g_script, offLocalVars + idx * 4); }
 float&   VarF(int idx) { return At<float>(g_script, offLocalVars + idx * 4); }
@@ -85,7 +91,16 @@ bool Op(uint16_t opcode, std::initializer_list<Arg> args)
         switch (a.kind) {
         case Arg::Int:   code[n++] = 0x01; memcpy(code + n, &a.i, 4); n += 4; break;  // int32 literal
         case Arg::Float: code[n++] = 0x06; memcpy(code + n, &a.f, 4); n += 4; break;  // float literal
-        case Arg::Var:   code[n++] = 0x03; uint16_t v = (uint16_t)a.i; memcpy(code + n, &v, 2); n += 2; break; // local var
+        case Arg::Var:   { code[n++] = 0x03; uint16_t v = (uint16_t)a.i; memcpy(code + n, &v, 2); n += 2; break; } // local var
+        case Arg::Str8:
+        case Arg::Str16: {
+            size_t len = a.kind == Arg::Str8 ? 8 : 16;
+            code[n++] = a.kind == Arg::Str8 ? 0x09 : 0x0F;
+            memset(code + n, 0, len);
+            strncpy((char*)code + n, a.s, len - 1);
+            n += len;
+            break;
+        }
         }
     }
     At<uint8_t*>(g_script, offCurrentIP) = code;
@@ -180,6 +195,8 @@ GameVersion DetectVersion()
         g_addr.radarTraces       = Rebase(g_addr.radarTraces);
         g_addr.gravity           = Rebase(g_addr.gravity);
         g_addr.d3dDevice         = Rebase(g_addr.d3dDevice);
+        g_addr.modelInfoPtrs     = Rebase(g_addr.modelInfoPtrs);
+        g_addr.weaponInfo        = Rebase(g_addr.weaponInfo);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
     }
@@ -357,11 +374,12 @@ static float SpawnDistance(int model)
     }
 }
 
-void SpawnVehicle(int model)
+void SpawnVehicle(int model, bool warpInside, const char* plate)
 {
     if (!InGame() || ActiveInterior() != 0) return;
     int ch = PlayerChar();
     LoadModels({ model });
+    if (plate && *plate) Op(0x0674, { I(model), S8(plate) });      // CUSTOM_PLATE_FOR_NEXT_CAR
     Op(0x04C4, { I(ch), F(0.0f), F(SpawnDistance(model)), F(0.5f), V(2), V(3), V(4) }); // GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS
     float x = VarF(2), y = VarF(3), z = VarF(4);
     Op(0x0172, { I(ch), V(5) });                                     // GET_CHAR_HEADING
@@ -369,9 +387,174 @@ void SpawnVehicle(int model)
     Op(0x00A5, { I(model), F(x), F(y), F(z), V(6) });                // CREATE_CAR -> var6
     int car = VarI(6);
     Op(0x0175, { I(car), F(heading) });                              // SET_CAR_HEADING
+    Op(0x020A, { I(car), I(1) });                                    // LOCK_CAR_DOORS 1 = unlocked (tank, some planes spawn locked)
+    if (warpInside) Op(0x036A, { I(ch), I(car) });                   // WARP_CHAR_INTO_CAR
     Op(0x01C3, { I(car) });                                          // MARK_CAR_AS_NO_LONGER_NEEDED
     ReleaseModels({ model });
-    Log("Spawned model %d handle %d at %.1f %.1f %.1f", model, car, x, y, z);
+    Log("Spawned model %d handle %d at %.1f %.1f %.1f%s", model, car, x, y, z, warpInside ? " (warped in)" : "");
+}
+
+// --- vehicle customizer ----------------------------------------------------------
+
+int PaintjobCount(int model)
+{
+    if (!g_addr.modelInfoPtrs || model < 0 || model >= 20000) return 0;
+    void* mi = Mem<void*>(g_addr.modelInfoPtrs + model * 4);
+    if (!mi) return 0;
+    int n = 0;
+    while (n < 4 && At<int16_t>(mi, 0x2FA + n * 2) != -1) ++n;    // CVehicleModelInfo::m_anRemapTxds[4]
+    return n;
+}
+
+void SetPaintjob(int index)   // -1 removes
+{
+    int car = PlayerCar();
+    if (car >= 0) Op(0x06ED, { I(car), I(index) });                 // GIVE_VEHICLE_PAINTJOB
+}
+
+void AddPart(int part, int linked)
+{
+    int car = PlayerCar();
+    if (car < 0) return;
+    LoadModels({ part, linked });
+    Op(0x06E7, { I(car), I(part), V(2) });                          // ADD_VEHICLE_MOD
+    if (linked > 0) Op(0x06E7, { I(car), I(linked), V(2) });
+    ReleaseModels({ part, linked });
+}
+
+void RemovePart(int part, int linked)
+{
+    int car = PlayerCar();
+    if (car < 0) return;
+    Op(0x06E8, { I(car), I(part) });                                // REMOVE_VEHICLE_MOD
+    if (linked > 0) Op(0x06E8, { I(car), I(linked) });
+}
+
+// --- outfit / skin ---------------------------------------------------------------
+
+static void BuildPlayer() { Op(0x070D, { I(0) }); }                  // BUILD_PLAYER_MODEL
+
+void GiveClothes(const char* texture, const char* model, int part)
+{
+    if (!InGame()) return;
+    Op(0x087B, { I(0), S16(texture), S16(model), I(part) });        // GIVE_PLAYER_CLOTHES_OUTSIDE_SHOP
+    BuildPlayer();
+}
+
+void RemoveClothes(int part)
+{
+    // An empty name hashes to 0xFFFFFFFF, so clearing a slot means zeroing CPedClothesDesc keys directly.
+    // Texture part -> model slot, decoded from the game's CClothes::GetTextureDependency table.
+    static const int kModelSlot[18] = { 0, 1, 3, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, 5, 6, 7, 8, 9 };
+    if (!InGame() || part < 0 || part >= 18) return;
+    void* desc = Mem<void*>(g_addr.players + 0x08);                 // CPlayerInfo::m_PlayerData.m_pPedClothesDesc
+    if (!desc) return;
+    At<uint32_t>(desc, 0x28 + part * 4) = 0;
+    if (kModelSlot[part] >= 0) At<uint32_t>(desc, kModelSlot[part] * 4) = 0;
+    BuildPlayer();
+}
+
+void SaveOutfit()    { Op(0x0793, {}); }                              // STORE_CLOTHES_STATE
+void RestoreOutfit() { Op(0x0794, {}); BuildPlayer(); }               // RESTORE_CLOTHES_STATE
+
+void SetSkin(int model)   // 0 = CJ
+{
+    if (!InGame() || PlayerCar() >= 0) return;
+    if (model > 0) LoadModels({ model });
+    Op(0x09C7, { I(0), I(model) });                                 // SET_PLAYER_MODEL
+    if (model > 0) ReleaseModels({ model });
+    else BuildPlayer();                                             // CJ needs his clothes rebuilt
+    Log("Skin -> %d", model);
+}
+
+// --- preview camera -----------------------------------------------------------------
+
+void PreviewCamera(bool on, bool onVehicle, float yawDeg, float dist, float height)
+{
+    static bool active = false;
+    if (!on || !InGame()) {
+        if (active) Op(0x015A, {});                                  // RESTORE_CAMERA_JUMPCUT
+        active = false;
+        return;
+    }
+    float x, y, z, heading;
+    int car = onVehicle ? PlayerCar() : -1;
+    if (car >= 0) {
+        Op(0x00AA, { I(car), V(2), V(3), V(4) });                    // GET_CAR_COORDINATES
+        Op(0x0174, { I(car), V(5) });                                // GET_CAR_HEADING
+    } else {
+        int ch = PlayerChar();
+        Op(0x00A0, { I(ch), V(2), V(3), V(4) });                     // GET_CHAR_COORDINATES
+        Op(0x0172, { I(ch), V(5) });                                 // GET_CHAR_HEADING
+    }
+    x = VarF(2); y = VarF(3); z = VarF(4); heading = VarF(5);
+    float a = (heading + yawDeg) * 0.0174533f;                       // yaw 0 = in front, looking back at it
+    float cx = x - sinf(a) * dist, cy = y + cosf(a) * dist;
+    Op(0x015F, { F(cx), F(cy), F(z + height), F(0), F(0), F(0) });  // SET_FIXED_CAMERA_POSITION
+    Op(0x0160, { F(x), F(y), F(z + (car >= 0 ? 0.3f : 0.5f)), I(2) }); // POINT_CAMERA_AT_POINT, jump cut
+    active = true;
+}
+
+// --- weapon damage ------------------------------------------------------------------
+
+// The pistol entry (type 22) must use model 346 in slot 2 with deagle (348) and shotgun (349)
+// two and three entries later - a cheap check that the table really is CWeaponInfo[].
+static bool LooksLikeWeaponTable(uint8_t* t)
+{
+    uint8_t* e = t + 22 * 0x70;
+    return *(int*)(e + 0x0C) == 346 && *(int*)(e + 0x14) == 2 &&
+           *(int*)(e + 2 * 0x70 + 0x0C) == 348 && *(int*)(e + 3 * 0x70 + 0x0C) == 349;
+}
+
+static uint8_t* FindWeaponInfo()
+{
+    static uint8_t* cached = nullptr;
+    static bool searched = false;
+    if (searched) return cached;
+    searched = true;
+    if (g_addr.weaponInfo && Readable(g_addr.weaponInfo, 80 * 0x70) && LooksLikeWeaponTable((uint8_t*)g_addr.weaponInfo)) {
+        cached = (uint8_t*)g_addr.weaponInfo;
+    } else {
+        // Unknown layout: scan the exe's writable memory for the same signature.
+        auto base = (uint8_t*)GetModuleHandleA(nullptr);
+        auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
+        uint8_t* end = base + nt->OptionalHeader.SizeOfImage;
+        const DWORD writable = PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+        for (uint8_t* p = base; p < end && !cached;) {
+            MEMORY_BASIC_INFORMATION mbi;
+            if (!VirtualQuery(p, &mbi, sizeof(mbi))) break;
+            uint8_t* rEnd = (uint8_t*)mbi.BaseAddress + mbi.RegionSize;
+            if (mbi.State == MEM_COMMIT && (mbi.Protect & writable))
+                for (uint8_t* e = p + 22 * 0x70; e + 4 * 0x70 < rEnd; e += 4)
+                    if (LooksLikeWeaponTable(e - 22 * 0x70)) { cached = e - 22 * 0x70; break; }
+            p = rEnd;
+        }
+    }
+    if (cached) Log("Weapon info table at %p (pistol clip %u, damage %u)", cached,
+                    *(uint16_t*)(cached + 22 * 0x70 + 0x20), *(uint16_t*)(cached + 22 * 0x70 + 0x22));
+    else        Log("Weapon info table not found - damage multiplier disabled");
+    return cached;
+}
+
+bool SetDamageMultiplier(float mult)
+{
+    constexpr int kEntries = 80;    // 47 weapon types + poor/pro/special skill variants
+    static uint16_t original[kEntries];
+    static bool saved = false;
+    uint8_t* table = FindWeaponInfo();
+    if (!table) return false;
+    for (int i = 0; i < kEntries; ++i) {
+        uint8_t* e = table + i * 0x70;
+        int model = *(int*)(e + 0x0C);
+        if (model != -1 && model != 0 && (model < 321 || model > 372)) break;   // ran past the table
+        uint16_t& dmg = *(uint16_t*)(e + 0x22);
+        if (!saved) original[i] = dmg;
+        if (original[i] == 0) continue;
+        float v = original[i] * mult;
+        dmg = (uint16_t)(v < 1.0f ? 1.0f : v > 30000.0f ? 30000.0f : v);
+    }
+    saved = true;
+    return true;
 }
 
 void GiveJetpack()

@@ -55,7 +55,27 @@ void     SetVehicleProofs(bool on);
 void     RepairVehicle();
 void     FlipVehicle();
 void     BoostVehicle(float factor);
-void     SpawnVehicle(int modelId);           // no-op indoors
+void     SpawnVehicle(int modelId, bool warpInside, const char* plate);   // no-op indoors; doors unlocked
+
+// --- vehicle customizer (current car) -----------------------------------------
+int      PaintjobCount(int model);
+void     SetPaintjob(int index);                // -1 removes
+void     AddPart(int part, int linked);         // linked: other half of a pair or -1
+void     RemovePart(int part, int linked);
+
+// --- outfit / skin -------------------------------------------------------------
+void     GiveClothes(const char* texture, const char* model, int part);
+void     RemoveClothes(int part);
+void     SaveOutfit();                          // one slot, shared with the game's own shops
+void     RestoreOutfit();
+void     SetSkin(int model);                    // 0 = CJ; on foot only
+
+// --- preview camera ---------------------------------------------------------------
+// Call every frame while previewing; on=false restores the normal camera.
+void     PreviewCamera(bool on, bool onVehicle, float yawDeg, float dist, float height);
+
+// --- weapons ------------------------------------------------------------------------
+bool     SetDamageMultiplier(float mult);       // all weapons, every ped; false if unsupported
 
 // --- movement -----------------------------------------------------------------
 // Camera-relative flight: WASD, Space up, Ctrl down, Shift faster. Call every frame.

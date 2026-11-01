@@ -19,10 +19,22 @@ struct Toggles {
     int  frozenMinute   = 0;
     bool lockWeather    = false;
     int  weather        = 0;
+    bool spawnInside    = true;
+    char plate[9]       = "";
+    float damageMult    = 1.0f;
+};
+
+// Orbiting preview camera for the editors. The menu fills this in every frame it wants a
+// preview; the tick applies it (and restores the normal camera once nobody asks for it).
+struct PreviewCam {
+    bool  active = false;
+    bool  onVehicle = false;
+    float yaw = 0.0f, dist = 6.0f, height = 1.5f;
 };
 
 extern Toggles g_toggles;
-extern bool    g_gameFocused;   // game window focused and menu closed (set by the Present hook)
+extern bool    g_gameFocused;
+extern PreviewCam g_preview;   // game window focused and menu closed (set by the Present hook)
 
 namespace Features {
 void Queue(std::function<void()> fn);   // run on the next game tick

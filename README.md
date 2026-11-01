@@ -7,8 +7,10 @@ Press **Insert** in game to open it.
 ## Features
 
 - **Player:** god mode, infinite armour and ammo, never wanted, wanted level, money, noclip (**F7**), jetpack
-- **Vehicle:** spawn any car, bike, plane or boat, plus god mode, auto repair, flip, boost and paint
-- **Weapons:** every weapon, or quick packs
+- **Vehicle:** spawn any car, bike, plane or boat, optionally straight into the driver's seat and with a custom plate, plus god mode, auto repair, flip and boost
+- **Customize:** a pocket mod shop. Pick paint from the real colour palette, apply paintjobs, and fit spoilers, bumpers, side skirts, wheels, nitro and hydraulics. A showroom camera circles the car while you work.
+- **Outfit:** every piece of clothing, haircut and tattoo, plus a skin changer. A mirror camera shows you the result.
+- **Weapons:** every weapon or quick packs, plus a damage multiplier from x0.1 to one-hit kills
 - **Teleport:** map marker, coordinates, or a list of preset places
 - **World:** time, freeze time, weather, game speed
 - **Stats:** fat, muscle, stamina, driving, flying and weapon skills
@@ -79,3 +81,4 @@ Most features run through the game's own mission-script engine, the same way CLE
 | `src/features.cpp` | Toggles that run every frame (god mode, noclip…) |
 | `src/hooks.cpp` | Drawing, input blocking, Direct3D hooks |
 | `src/data.h` | Lists of vehicles, weapons, teleports |
+| `src/gamedata.cpp` | Reads car colours, tuning parts, clothes and skins from the game's own data files |

@@ -37,7 +37,8 @@ add_library(RiffedMenu SHARED
     src/game.cpp
     src/features.cpp
     src/hooks.cpp
-    src/menu.cpp)
+    src/menu.cpp
+    src/gamedata.cpp)
 target_link_libraries(RiffedMenu PRIVATE imgui minhook d3d9 dinput8 dxguid dwmapi gdi32 imm32)
 target_compile_options(RiffedMenu PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 

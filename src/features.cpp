@@ -1,11 +1,13 @@
 #include "features.h"
 #include "game.h"
 #include "log.h"
+#include "gamedata.h"
 #include <windows.h>
 #include <algorithm>
 #include <vector>
 
 Toggles g_toggles;
+PreviewCam g_preview;
 bool    g_gameFocused = false;
 
 static SRWLOCK g_queueLock = SRWLOCK_INIT;
@@ -84,6 +86,8 @@ void Tick()
     f7Was = f7;
     Game::Noclip(g_toggles.noclip, g_gameFocused ? dt : 0.0f, g_toggles.noclipSpeed);   // dt 0 = hover in place
 
+    Game::PreviewCamera(g_preview.active, g_preview.onVehicle, g_preview.yaw, g_preview.dist, g_preview.height);
+
     if (g_toggles.freezeTime) Game::SetTime(g_toggles.frozenHour, g_toggles.frozenMinute);
     if (g_toggles.lockWeather && refresh) Game::ForceWeather(g_toggles.weather);
 
@@ -101,7 +105,9 @@ void SelfTest(void* ped)
         if (stage == 0) Log("SELFTEST armed - waiting 5 s in game");
         inGameSince = GetTickCount();
     }
-    if (stage >= 99 || GetTickCount() - inGameSince < 5000) return;
+    static DWORD nextStep = 0;
+    if (stage >= 99 || GetTickCount() - inGameSince < 5000 || GetTickCount() < nextStep) return;
+    nextStep = GetTickCount() + 600;   // let the game settle between steps (warps, streaming)
 
     switch (stage++) {
     case 0: {
@@ -109,20 +115,40 @@ void SelfTest(void* ped)
             Game::PedArmour(ped), Game::Money());
         CVector p = Game::PlayerPosition();
         int h, m; Game::GetTime(h, m);
-        Log("SELFTEST pos=%.1f %.1f %.1f time=%02d:%02d wanted=%d", p.x, p.y, p.z, h, m, Game::WantedLevel());
-        Log("SELFTEST stats fat=%.0f stamina=%.0f muscle=%.0f driving=%.0f pistol=%.0f", Game::GetStat(21), Game::GetStat(22),
-            Game::GetStat(23), Game::GetStat(160), Game::GetStat(69));
-        CVector w;
-        if (Game::WaypointPosition(w)) Log("SELFTEST waypoint at %.1f %.1f", w.x, w.y);
-        else Log("SELFTEST no waypoint set");
+        Log("SELFTEST pos=%.1f %.1f %.1f time=%02d:%02d wanted=%d interior=%d", p.x, p.y, p.z, h, m, Game::WantedLevel(), Game::ActiveInterior());
         break;
     }
-    case 1: Game::SetWantedLevel(1); Log("SELFTEST wanted after set(1) = %d", Game::WantedLevel()); break;
-    case 2: Game::SetWantedLevel(0); Log("SELFTEST wanted after set(0) = %d", Game::WantedLevel()); break;
-    case 3: Game::SetPlayerProofs(true); Game::SetPlayerProofs(false); Log("SELFTEST proofs on/off ok"); break;
-    case 4: Game::GiveWeapon(22, 50); Log("SELFTEST weapon slot2 type=%d", *(int*)((char*)ped + 0x5A0 + 2 * 0x1C)); break;
-    case 5: Game::SpawnVehicle(411); break;
-    case 6: Log("SELFTEST active interior = %d", Game::ActiveInterior()); break;
+    case 1:
+        GameData::Load();
+        Log("SELFTEST sultan: %d parts, %d paintjobs; %d clothing items, %d skins, %d colours",
+            (int)GameData::PartsFor(560).size(), Game::PaintjobCount(560), (int)GameData::Clothes().size(),
+            (int)GameData::Skins().size(), (int)GameData::CarColours().size());
+        break;
+    case 2:
+        if (Game::ActiveInterior() != 0) { Log("SELFTEST leaving interior"); Game::Teleport({ 2495.0f, -1687.0f, 13.5f }, true); }
+        break;
+    case 3: Game::SpawnVehicle(560, true, "RIFFED"); break;
+    case 4: {
+        void* veh = Game::PlayerVehicle();
+        Log("SELFTEST in vehicle after spawn-inside: %s (model %d)", veh ? "yes" : "NO", veh ? Game::VehicleModel(veh) : -1);
+        if (!veh) { stage = 7; break; }
+        auto parts = GameData::PartsFor(560);
+        for (auto& pt : parts)
+            if (pt.category == "Spoiler" || pt.category == "Side skirts" || pt.category == "Wheels") {
+                Game::AddPart(pt.id, GameData::LinkedPart(pt.id));
+                Log("SELFTEST fitted %s %d (%s), linked %d", pt.category.c_str(), pt.id, pt.name.c_str(), GameData::LinkedPart(pt.id));
+                if (pt.category == "Wheels") break;
+            }
+        Game::SetPaintjob(0);
+        Game::SetVehicleColors(3, 1);
+        Log("SELFTEST paintjob 0 + colours 3/1 applied, now %d/%d", Game::VehicleColor(veh, 0), Game::VehicleColor(veh, 1));
+        break;
+    }
+    case 5: g_preview = { true, true, 35.0f, 6.5f, 1.8f }; Game::PreviewCamera(true, true, 35.0f, 6.5f, 1.8f); Log("SELFTEST showroom camera on"); break;
+    case 6: g_preview.active = false; Game::PreviewCamera(false, true, 0, 0, 0); Log("SELFTEST showroom camera off"); break;
+    case 7: Game::SaveOutfit(); Game::GiveClothes("glasses01", "glasses01", 15); Log("SELFTEST gave glasses01"); break;
+    case 8: Game::RestoreOutfit(); Log("SELFTEST outfit restored"); break;
+    case 9: Log("SELFTEST damage multiplier supported: %s", Game::SetDamageMultiplier(1.0f) ? "yes" : "NO"); break;
     default:
         Log("SELFTEST finished - delete RiffedMenu.selftest to disable");
         stage = 99;

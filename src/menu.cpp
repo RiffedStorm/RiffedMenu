@@ -1,5 +1,6 @@
 #include "menu.h"
 #include "data.h"
+#include "gamedata.h"
 #include "features.h"
 #include "game.h"
 #include "log.h"
@@ -11,7 +12,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <deque>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -208,7 +211,9 @@ static void SpawnFromMenu(const VehicleEntry& v)
 {
     if (Game::ActiveInterior() != 0) { Notify("Can't spawn vehicles indoors - go outside first"); return; }
     int id = v.id;
-    Features::Queue([id] { Game::SpawnVehicle(id); });
+    bool inside = g_toggles.spawnInside;
+    std::string plate = g_toggles.plate;
+    Features::Queue([id, inside, plate] { Game::SpawnVehicle(id, inside, plate.c_str()); });
     Notify("Spawned %s", v.name);
 }
 
@@ -257,6 +262,11 @@ static void TabVehicle()
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
     ImGui::Combo("##vcat", &category, kVehicleCategories, IM_ARRAYSIZE(kVehicleCategories));
+    ImGui::Checkbox("Spawn inside", &g_toggles.spawnInside);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Puts you in the driver's seat. Doors are always unlocked.");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##plate", "Custom plate (8 chars, cars only)", g_toggles.plate, sizeof(g_toggles.plate));
 
     float footer = ImGui::GetFrameHeightWithSpacing();
     if (ImGui::BeginChild("##vlist", ImVec2(0, -footer), ImGuiChildFlags_Borders)) {
@@ -283,6 +293,218 @@ static void TabVehicle()
     ImGui::EndDisabled();
 }
 
+// ---------------------------------------------------------------------------
+// Editors (vehicle customizer, outfit). Both preview live on the player and can
+// switch to an orbiting camera (g_preview, applied by the game tick).
+// ---------------------------------------------------------------------------
+static void PreviewControls(const char* label, bool onVehicle, float defDist, float defHeight)
+{
+    static bool enabled[2] = { true, true };
+    static bool spin[2] = { true, false };
+    static float yaw[2] = { 35.0f, 0.0f };
+    static float zoom[2] = { 1.0f, 1.0f };
+    int k = onVehicle ? 0 : 1;
+
+    ImGui::Checkbox(label, &enabled[k]);
+    ImGui::SameLine();
+    ImGui::Checkbox("Auto-rotate", &spin[k]);
+    if (enabled[k]) {
+        if (spin[k]) yaw[k] = fmodf(yaw[k] + ImGui::GetIO().DeltaTime * 25.0f, 360.0f);
+        ImGui::SetNextItemWidth(HalfWidth());
+        ImGui::SliderFloat("##yaw", &yaw[k], 0.0f, 360.0f, "Angle %.0f deg");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderFloat("##zoom", &zoom[k], 0.5f, 2.5f, "Distance x%.1f");
+        g_preview = { true, onVehicle, yaw[k], defDist * zoom[k], defHeight * zoom[k] };
+    }
+}
+
+static ImVec4 Swatch(int i)
+{
+    const auto& pal = GameData::CarColours();
+    if (i < 0 || i >= (int)pal.size()) return ImVec4(0.5f, 0.5f, 0.5f, 1);
+    return ImVec4(pal[i].r / 255.0f, pal[i].g / 255.0f, pal[i].b / 255.0f, 1);
+}
+
+static void PaintPicker(void* veh)
+{
+    static int target = 0;   // 0 primary, 1 secondary
+    int c[2] = { Game::VehicleColor(veh, 0), Game::VehicleColor(veh, 1) };
+    ImGui::RadioButton("Primary", &target, 0);
+    ImGui::SameLine(); ImGui::ColorButton("##p", Swatch(c[0]), ImGuiColorEditFlags_NoTooltip, ImVec2(ImGui::GetFrameHeight() * 1.6f, ImGui::GetFrameHeight()));
+    ImGui::SameLine(0, 24);
+    ImGui::RadioButton("Secondary", &target, 1);
+    ImGui::SameLine(); ImGui::ColorButton("##s", Swatch(c[1]), ImGuiColorEditFlags_NoTooltip, ImVec2(ImGui::GetFrameHeight() * 1.6f, ImGui::GetFrameHeight()));
+
+    int count = (int)GameData::CarColours().size();
+    float sz = ImGui::GetFrameHeight();
+    float sp = 3.0f;
+    int perRow = std::max(1, (int)((ImGui::GetContentRegionAvail().x + sp) / (sz + sp)));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(sp, sp));
+    for (int i = 0; i < count; ++i) {
+        if (i % perRow) ImGui::SameLine();
+        ImGui::PushID(i);
+        bool current = c[target] == i;
+        if (current) ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1, 1, 1, 1));
+        if (current) ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+        if (ImGui::ColorButton("##c", Swatch(i), ImGuiColorEditFlags_NoTooltip, ImVec2(sz, sz))) {
+            c[target] = i;
+            Features::Queue([c0 = c[0], c1 = c[1]] { Game::SetVehicleColors(c0, c1); });
+        }
+        if (current) { ImGui::PopStyleVar(); ImGui::PopStyleColor(); }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Colour %d", i);
+        ImGui::PopID();
+    }
+    ImGui::PopStyleVar();
+}
+
+static void TabCustomize()
+{
+    void* veh = Game::PlayerVehicle();
+    if (!veh) {
+        ImGui::Spacing();
+        ImGui::TextWrapped("Get into a vehicle to customise it. Tip: spawn one from the Vehicle tab with \"Spawn inside\" on.");
+        return;
+    }
+    int model = Game::VehicleModel(veh);
+
+    SectionTitle("Preview");
+    PreviewControls("Showroom camera", true, 6.5f, 1.8f);
+
+    SectionTitle("Paint");
+    PaintPicker(veh);
+
+    int jobs = Game::PaintjobCount(model);
+    if (jobs > 0) {
+        SectionTitle("Paintjob");
+        float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * jobs) / (jobs + 1);
+        if (ImGui::Button("None", ImVec2(w, 0))) Features::Queue([] { Game::SetPaintjob(-1); });
+        for (int j = 0; j < jobs; ++j) {
+            ImGui::SameLine();
+            char l[16]; snprintf(l, sizeof(l), "Paintjob %d", j + 1);
+            if (ImGui::Button(l, ImVec2(w, 0))) Features::Queue([j] { Game::SetPaintjob(j); });
+        }
+    }
+
+    SectionTitle("Parts");
+    // Parts fitted through this menu, per vehicle: category -> part id (the game keeps its own list too).
+    static std::map<void*, std::map<std::string, int>> fitted;
+    static int cachedModel = -1;
+    static std::vector<TuningPart> parts;
+    if (cachedModel != model) { parts = GameData::PartsFor(model); cachedModel = model; }
+    if (parts.empty()) {
+        ImGui::TextDisabled("This vehicle has no tuning parts (only cars a mod shop accepts do).");
+        return;
+    }
+    auto& mine = fitted[veh];
+    if (ImGui::BeginTable("##parts", 2, ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("cat", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("Front bumper__").x);
+        ImGui::TableSetupColumn("pick", ImGuiTableColumnFlags_WidthStretch);
+        for (size_t i = 0; i < parts.size();) {
+            const std::string& cat = parts[i].category;
+            size_t j = i;
+            while (j < parts.size() && parts[j].category == cat) ++j;
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::AlignTextToFramePadding(); ImGui::TextUnformatted(cat.c_str());
+            ImGui::TableNextColumn(); ImGui::SetNextItemWidth(-1);
+            int cur = mine.count(cat) ? mine[cat] : -1;
+            std::string preview = "Stock";
+            for (size_t k = i; k < j; ++k) if (parts[k].id == cur) preview = parts[k].name;
+            ImGui::PushID(cat.c_str());
+            if (ImGui::BeginCombo("##c", preview.c_str())) {
+                auto apply = [&](int newId) {
+                    int old = cur;
+                    Features::Queue([old, newId] {
+                        if (old > 0) Game::RemovePart(old, GameData::LinkedPart(old));
+                        if (newId > 0) Game::AddPart(newId, GameData::LinkedPart(newId));
+                    });
+                    if (newId > 0) mine[cat] = newId; else mine.erase(cat);
+                };
+                if (ImGui::Selectable("Stock", cur == -1)) apply(-1);
+                for (size_t k = i; k < j; ++k) {
+                    char l[64]; snprintf(l, sizeof(l), "%s##%d", parts[k].name.c_str(), parts[k].id);
+                    if (ImGui::Selectable(l, cur == parts[k].id)) apply(parts[k].id);
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopID();
+            i = j;
+        }
+        ImGui::EndTable();
+    }
+    if (ImGui::Button("Remove all parts fitted here", ImVec2(-1, 0))) {
+        std::vector<int> ids;
+        for (auto& [c, id] : mine) ids.push_back(id);
+        mine.clear();
+        Features::Queue([ids] { for (int id : ids) Game::RemovePart(id, GameData::LinkedPart(id)); });
+        Notify("Parts removed");
+    }
+}
+
+static void TabOutfit()
+{
+    SectionTitle("Preview");
+    PreviewControls("Mirror camera", false, 2.6f, 0.4f);
+    if (ImGui::Button("Save outfit", ImVec2(HalfWidth(), 0))) { Features::Queue([] { Game::SaveOutfit(); }); Notify("Outfit saved"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Revert to saved outfit", ImVec2(-1, 0))) Features::Queue([] { Game::RestoreOutfit(); });
+
+    SectionTitle("Clothes, hair & tattoos");
+    const auto& items = GameData::Clothes();
+    static int part = 0;
+    static char filter[32] = "";
+    // Body parts that actually have items, in a sensible order.
+    static const int order[] = { 0, 2, 3, 1, 16, 15, 13, 14, 4, 5, 6, 7, 8, 9, 10, 11, 12, 17 };
+    ImGui::SetNextItemWidth(HalfWidth());
+    if (ImGui::BeginCombo("##part", GameData::BodyPartName(part))) {
+        for (int p : order) {
+            bool any = false;
+            for (auto& it : items) any |= it.part == p;
+            if (any && ImGui::Selectable(GameData::BodyPartName(p), p == part)) part = p;
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##cf", "Search...", filter, sizeof(filter));
+
+    bool removable = part >= 4;   // torso/hair/legs/shoes always need something; pick a basic item instead
+    float listH = ImGui::GetTextLineHeightWithSpacing() * 9;
+    if (ImGui::BeginChild("##clothes", ImVec2(0, listH), ImGuiChildFlags_Borders)) {
+        if (removable && ImGui::Selectable("(none - remove)")) { int p = part; Features::Queue([p] { Game::RemoveClothes(p); }); }
+        for (auto& it : items) {
+            if (it.part != part || !ContainsI(it.texture.c_str(), filter)) continue;
+            char l[64]; snprintf(l, sizeof(l), "%s##%s%s", it.texture.c_str(), it.texture.c_str(), it.model.c_str());
+            if (ImGui::Selectable(l)) {
+                std::string t = it.texture, m = it.model; int p = it.part;
+                Features::Queue([t, m, p] { Game::GiveClothes(t.c_str(), m.c_str(), p); });
+            }
+            if (!it.model.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("model: %s", it.model.c_str());
+        }
+    }
+    ImGui::EndChild();
+    ImGui::TextDisabled("Click an item to put it on. Clothes only show on CJ's own skin.");
+
+    SectionTitle("Skin");
+    static char skinFilter[32] = "";
+    if (ImGui::Button("Back to CJ", ImVec2(HalfWidth(), 0))) Features::Queue([] { Game::SetSkin(0); });
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##sf", "Search skins...", skinFilter, sizeof(skinFilter));
+    if (ImGui::BeginChild("##skins", ImVec2(0, listH), ImGuiChildFlags_Borders)) {
+        for (auto& s : GameData::Skins()) {
+            if (!ContainsI(s.name.c_str(), skinFilter)) continue;
+            char l[64]; snprintf(l, sizeof(l), "%-12s  %d##sk%d", s.name.c_str(), s.id, s.id);
+            if (ImGui::Selectable(l)) {
+                if (Game::PlayerVehicle()) Notify("Get out of the vehicle first");
+                else { int id = s.id; Features::Queue([id] { Game::SetSkin(id); }); }
+            }
+        }
+    }
+    ImGui::EndChild();
+}
+
 static void TabWeapons()
 {
     static int ammoMul = 1;
@@ -290,6 +512,22 @@ static void TabWeapons()
     Toggle("Infinite ammo / no reload", &g_toggles.infiniteAmmo);
     ImGui::SetNextItemWidth(-1);
     ImGui::SliderInt("##ammomul", &ammoMul, 1, 10, "Ammo x%d");
+
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::SliderFloat("##dmg", &g_toggles.damageMult, 0.1f, 10.0f, "Weapon damage x%.1f", ImGuiSliderFlags_Logarithmic))
+        Features::Queue([m = g_toggles.damageMult] { Game::SetDamageMultiplier(m); });
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGui::SetTooltip("Applies to every weapon for everyone - enemies too.");
+    const float presets[] = { 0.5f, 1.0f, 2.0f, 5.0f, 100.0f };
+    const char* presetLabels[] = { "x0.5", "Normal", "x2", "x5", "One-hit" };
+    float pw = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 4) / 5;
+    for (int i = 0; i < 5; ++i) {
+        if (i) ImGui::SameLine();
+        if (ImGui::Button(presetLabels[i], ImVec2(pw, 0))) {
+            g_toggles.damageMult = presets[i];
+            Features::Queue([m = presets[i]] { Game::SetDamageMultiplier(m); });
+            Notify("Weapon damage x%g", presets[i]);
+        }
+    }
 
     if (ImGui::Button("Gangster pack", ImVec2(HalfWidth(), 0))) {
         Features::Queue([m = ammoMul] { for (int t : {5, 24, 26, 28, 30, 18}) Game::GiveWeapon(t, 500 * m); });
@@ -476,6 +714,7 @@ void Menu::Toggle() { g_open = !g_open; Log("Menu %s", g_open ? "opened" : "clos
 void Menu::Render()
 {
     DrawToasts();
+    g_preview.active = false;   // editors re-request it below while their tab is visible
     if (!g_open) return;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -519,7 +758,9 @@ void Menu::Render()
     if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
         gameTab("Player", TabPlayer);
         gameTab("Vehicle", TabVehicle);
+        gameTab("Customize", TabCustomize);
         gameTab("Weapons", TabWeapons);
+        gameTab("Outfit", TabOutfit);
         gameTab("Teleport", TabTeleport);
         gameTab("World", TabWorld);
         gameTab("Stats", TabStats);
