@@ -819,6 +819,10 @@ static void TabGameplay()
         ImGui::BeginDisabled(!Game::CanPreventBusted());
         Toggle(T("Never get busted"), &p.neverBusted, T("Cops can't arrest you."));
         ImGui::EndDisabled();
+        ImGui::TableNextColumn();
+        ImGui::BeginDisabled(!Game::CanFreeDriveBy());
+        Toggle(T("Free-look drive-by"), &p.freeDriveBy, T("In the driver's seat with a submachine gun: hold right mouse to aim anywhere, left mouse to shoot."));
+        ImGui::EndDisabled();
         ImGui::TableNextColumn(); Toggle(T("Stay on bikes"), &p.noFallOffBike, T("CJ doesn't fall off bikes and motorbikes."));
         ImGui::TableNextColumn(); Toggle(T("Unlimited stamina"), &p.unlimitedStamina);
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);

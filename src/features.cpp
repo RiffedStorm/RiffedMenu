@@ -5,6 +5,7 @@
 #include "combat.h"
 #include "config.h"
 #include "gps.h"
+#include "hooks.h"
 #include "wheel.h"
 #include <windows.h>
 #include <algorithm>
@@ -95,10 +96,9 @@ static void Gameplay(void* ped, void* veh, float dt)
     apply(applied[2], p.noFallOffBike, Game::SetStayOnBike);
     apply(applied[3], p.neverBusted && Game::CanPreventBusted(), Game::SetNeverBusted);
     if (p.neverBusted) Game::ClearArrest();
-    if (p.infiniteBreath) {
-        static DWORD lastBreath = 0;
-        if (GetTickCount() - lastBreath > 500) { lastBreath = GetTickCount(); Game::RefillBreath(); }
-    }
+    static bool driveByApplied = false;
+    if (driveByApplied != p.freeDriveBy) { driveByApplied = p.freeDriveBy; Game::SetFreeDriveBy(driveByApplied); }
+    if (p.infiniteBreath) Game::RefillBreath();
 
     float& hp = Game::PedHealth(ped);
     float& ar = Game::PedArmour(ped);
@@ -162,6 +162,30 @@ static void Gameplay(void* ped, void* veh, float dt)
     if (clipApplied != p.clipMult) { clipApplied = p.clipMult; Game::SetClipMultiplier(p.clipMult); }
 
     Combat::SpawnPendingExplosions();
+
+    // Free-look drive-by: right mouse starts it, the mouse turns the camera, left mouse fires as usual.
+    static bool driveBy = false;
+    static int weaponBefore = 0;
+    int mouseX, mouseY;
+    Hooks::TakeMouseDelta(mouseX, mouseY);
+    int smg = 0;
+    { int c, a; Game::WeaponSlot(4, smg, c, a); if (a <= 0) smg = 0; }
+    bool wantDriveBy = p.freeDriveBy && Game::CanFreeDriveBy() && veh && Game::IsDriver(veh) && smg && g_gameFocused &&
+                       (GetAsyncKeyState(VK_RBUTTON) & 0x8000);
+    if (wantDriveBy && !driveBy) {
+        driveBy = true;
+        weaponBefore = Game::CurrentWeapon();
+        Game::SetCurrentWeapon(smg);
+        Game::StartDriveBy();
+    } else if (!wantDriveBy && driveBy) {
+        driveBy = false;
+        if (veh) { Game::StopDriveBy(); Game::SetCurrentWeapon(weaponBefore); }
+    }
+    if (driveBy && Game::CameraMode() == 55) {
+        const float sensitivity = 0.0035f;
+        Game::CameraBeta()  -= mouseX * sensitivity;
+        Game::CameraAlpha() = std::clamp(Game::CameraAlpha() - mouseY * sensitivity, -1.2f, 1.0f);
+    }
 
     // Nitrous
     static void* nitroCar = nullptr;

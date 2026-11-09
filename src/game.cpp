@@ -34,11 +34,12 @@ struct Addresses {
     uintptr_t bustedJump;         // CGameLogic::Update: `jne` past the "player is arrested" block
     uintptr_t frontEnd;           // FrontEndMenuManager
     uintptr_t arrestStart;        // CTaskSimpleArrestPed::StartAnim (thiscall ped)
+    uintptr_t driveByRecentre;    // two ints: how long the driver's drive-by camera waits before swinging back to the side
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
                                       0xB74490, 0xB74494, 0xB6F028, 0xA49960, 0xA8B42C, 0, 0x583530, 0x583480, 0x5E4280,
-                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0 };
+                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0, 0 };
 // Found by disassembly of gta-sa.exe build 459558 (PE timestamp 0x547CD3A3):
 //   0x46EDD0 reads opcode at [ecx+0x14], sets NOT flag [ecx+0xD2], dispatches via table 0x914BB0
 //   0xC100D0 is the base used by 139 sites of `imul r, r, 0x190`
@@ -52,7 +53,7 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 //   0x769840 is the call in ADD_EXPLOSION; 0x445BA3 is the jne before the only call of ArrestPlayer (0x561200).
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
-                                      0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890 };
+                                      0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0x93EBBC };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -224,7 +225,7 @@ GameVersion DetectVersion()
         g_addr.weaponInfo        = Rebase(g_addr.weaponInfo);
         for (uintptr_t* a : { &g_addr.pedPool, &g_addr.vehPool, &g_addr.camera, &g_addr.scriptSpace, &g_addr.activeScripts,
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
-                              &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart })
+                              &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.driveByRecentre })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -1019,7 +1020,42 @@ bool SetClipMultiplier(float mult)
 void SetNeverTired(bool on)   { if (InGame()) Op(0x0330, { I(0), I(on ? 1 : 0) }); }
 void SetFastReload(bool on)   { if (InGame()) Op(0x0331, { I(0), I(on ? 1 : 0) }); }
 void SetStayOnBike(bool on)   { if (InGame()) Op(0x08C6, { I(PlayerChar()), I(on ? 1 : 0) }); }
-void RefillBreath()           { if (InGame()) Op(0x080D, { I(PlayerChar()), F(1000.0f) }); }
+void RefillBreath()
+{
+    // Stays topped up at the highest value seen, which is the full bar for CJ's current lung stat.
+    void* ped = PlayerPed();
+    void* data = ped ? At<void*>(ped, 0x480) : nullptr;
+    if (!data) return;
+    float& breath = At<float>(data, 0x44);
+    static float full = 0.0f;
+    if (breath > full) full = breath;
+    breath = full;
+}
+
+bool CanFreeDriveBy() { return g_addr.driveByRecentre != 0; }
+
+bool IsDriver(void* veh) { return veh && At<void*>(veh, 0x460) == PlayerPed(); }
+
+void StartDriveBy()
+{
+    // No target and no aiming point: as with the missions' own drive-bys, the player's mouse aims.
+    Op(0x0713, { I(PlayerChar()), I(-1), I(-1), F(0.0f), F(0.0f), F(0.0f), F(300.0f), I(4), I(1), I(100) });   // TASK_DRIVE_BY
+}
+
+void StopDriveBy() { Op(0x0687, { I(PlayerChar()) }); }                 // CLEAR_CHAR_TASKS
+
+// CCam::Process_AimWeapon counts how long the mouse has been idle and then swings a driver's camera
+// back to the fixed side view. With limits nothing can reach, it stays on the mouse-aimed path.
+void SetFreeDriveBy(bool on)
+{
+    if (!g_addr.driveByRecentre) return;
+    static int original[2];
+    static bool saved = false;
+    int* limits = (int*)g_addr.driveByRecentre;
+    if (!saved) { original[0] = limits[0]; original[1] = limits[1]; saved = true; }
+    limits[0] = on ? 0x7FFFFFFF : original[0];
+    limits[1] = on ? 0x7FFFFFFF : original[1];
+}
 
 bool CanPreventBusted() { return g_addr.bustedJump != 0 && Mem<uint8_t>(g_addr.bustedJump) >= 0x75; }
 
@@ -1146,8 +1182,19 @@ static int FindRoutine(const char* key)
     for (int q = 0; q + (int)klen < kMissionSize; ++q) {
         if (memcmp(b + q, key, klen) != 0) continue;
         for (int p = q - 1; p > 0 && p > q - 900; --p) {
-            if (b[p] == 0x51 && b[p + 1] == 0x00) return p + 2;                       // previous RETURN
-            if (b[p] == 0x02 && b[p + 1] == 0x00 && b[p + 2] == 0x01) return p + 7;   // previous GOTO
+            int start = -1;
+            if (b[p] == 0x51 && b[p + 1] == 0x00) start = p + 2;                      // previous RETURN
+            if (b[p] == 0x02 && b[p + 1] == 0x00 && b[p + 2] == 0x01) start = p + 7;  // previous GOTO
+            if (start < 0) continue;
+            // Some missions only reach their reward if a "you really finished" check passes, and
+            // skipping leaves that check false. Start after any check that would jump past the text.
+            for (int g = start; g + 7 <= q; ++g) {
+                if (b[g] != 0x4D || b[g + 1] != 0x00 || b[g + 2] != 0x01) continue;   // GOTO_IF_FALSE
+                int target;
+                memcpy(&target, b + g + 3, 4);
+                if (-target > q) start = g + 7;
+            }
+            return start;
         }
         return -1;
     }

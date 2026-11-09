@@ -345,6 +345,8 @@ const Pair kPolish[] = {
     { "This deletes all your settings, favorites and saved configs. It can't be undone.", "Spowoduje to usunięcie wszystkich ustawień, ulubionych i zapisanych konfiguracji. Tego nie można cofnąć." },
     { "Settings reset to defaults", "Przywrócono ustawienia domyślne" },
     { "Cancel", "Anuluj" },
+    { "Free-look drive-by", "Swobodny drive-by" },
+    { "In the driver's seat with a submachine gun: hold right mouse to aim anywhere, left mouse to shoot.", "Na miejscu kierowcy, z pistoletem maszynowym: przytrzymaj prawy przycisk myszy, aby celować w dowolnym kierunku, a lewym strzelaj." },
     { "Save settings automatically", "Zapisuj ustawienia automatycznie" },
     { "Saves when you close the menu.", "Zapisuje przy zamykaniu menu." },
     { "Save settings", "Zapisz ustawienia" },

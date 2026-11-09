@@ -412,6 +412,14 @@ bool Hooks::InstallRenderHooks()
 using GetDeviceState_t = HRESULT(WINAPI*)(void*, DWORD, LPVOID);
 using GetDeviceData_t  = HRESULT(WINAPI*)(void*, DWORD, LPDIDEVICEOBJECTDATA, LPDWORD, DWORD);
 
+static long g_mouseX = 0, g_mouseY = 0;
+
+void Hooks::TakeMouseDelta(int& dx, int& dy)
+{
+    dx = (int)g_mouseX; dy = (int)g_mouseY;
+    g_mouseX = g_mouseY = 0;
+}
+
 // Up to 4 distinct implementations (A/W x keyboard/mouse), each needs its own trampoline.
 template <int N> struct DIHook {
     static inline GetDeviceState_t oState = nullptr;
@@ -419,6 +427,10 @@ template <int N> struct DIHook {
     static HRESULT WINAPI State(void* self, DWORD size, LPVOID data)
     {
         HRESULT hr = oState(self, size, data);
+        if (SUCCEEDED(hr) && data && (size == sizeof(DIMOUSESTATE) || size == sizeof(DIMOUSESTATE2))) {
+            g_mouseX += ((DIMOUSESTATE*)data)->lX;
+            g_mouseY += ((DIMOUSESTATE*)data)->lY;
+        }
         if (SUCCEEDED(hr) && Captured() && data) memset(data, 0, size);
         return hr;
     }

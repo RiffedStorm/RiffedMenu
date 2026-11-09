@@ -50,6 +50,7 @@ struct GameplayCfg {
     int   moneyPerKill = 0;
     int   damageTaken = 100;     // percent
     bool  explodingBullets = false; int explosionType = 0;
+    bool  freeDriveBy = false;
     bool  neverBusted = false, noFallOffBike = false, unlimitedStamina = false, infiniteBreath = false;
     bool  fastReload = false, slowmoAiming = false;
     float slowmoScale = 0.4f;

@@ -20,7 +20,7 @@ Press **Insert** in game to open it.
 - **Vehicle:** spawn anything, star your favorites and drag them into order, god mode, auto repair, flip, boost, infinite or always-on nitrous with no cooldown
 - **Customize:** a pocket mod shop with paint, paintjobs and parts, plus a showroom camera
 - **Weapons:** every weapon or quick packs, and a damage multiplier
-- **Gameplay:** custom max health, armour and ammo, regeneration, lifesteal, exploding bullets, never busted, stay on bikes, unlimited stamina and more
+- **Gameplay:** custom max health, armour and ammo, regeneration, lifesteal, exploding bullets, never busted, stay on bikes, unlimited stamina, free-look drive-by (hold right mouse in the driver's seat) and more
 - **Combat:** a simple aimbot and 2D box wallhack, both off by default, with Advanced settings if you want them
 - **Missions:** complete or fail the current mission, kill targets, teleport to the objective, or replay any mission without changing your story progress
 - **Outfit:** clothes, haircuts, tattoos and skins, with a mirror camera
