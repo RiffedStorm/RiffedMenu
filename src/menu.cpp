@@ -746,6 +746,25 @@ static void TabWorld()
     ImGui::SameLine();
     Toggle(T("Lock weather"), &g_toggles.lockWeather);
 
+    SectionTitle(T("Map"));
+    {
+        const char* open[] = { T("As in the story"), T("Open San Fierro"), T("Open the whole map") };
+        ImGui::SetNextItemWidth(-1);
+        ImGui::Combo("##mapopen", &g_toggles.mapOpen, open, IM_ARRAYSIZE(open));
+        ImGui::TextDisabled("%s", T("Removes the roadblocks and the wanted stars for entering closed areas."));
+        ImGui::BeginDisabled(!Game::CanRevealMap());
+        ImGui::TextUnformatted(T("Reveal on the pause map"));
+        const char* areas[] = { T("Whole map"), T("Los Santos"), T("San Fierro"), T("Las Venturas") };
+        if (ImGui::BeginTable("##reveal", 4)) {
+            for (int i = 0; i < 4; ++i) {
+                ImGui::TableNextColumn();
+                if (ImGui::Button(areas[i], ImVec2(-1, 0))) { Features::Queue([i] { Game::RevealMap(i); }); Notify(T("Map revealed")); }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::EndDisabled();
+    }
+
     if (!Game::HasGravity()) return;
     SectionTitle(T("Physics"));
     ImGui::SetNextItemWidth(-1);
@@ -1173,6 +1192,9 @@ static void TabSettings()
 
     SectionTitle(T("Updates"));
     ImGui::Checkbox(T("Tell me when a new version is out"), &g_toggles.updateNotify);
+    ImGui::BeginDisabled(!g_toggles.updateNotify);
+    ImGui::Checkbox(T("Check every 30 minutes while playing"), &g_toggles.updatePeriodic);
+    ImGui::EndDisabled();
     if (Update::Available()) {
         ImGui::TextColored(kAccent, T("Version %s is available (you have %s)."), Update::Latest().c_str(), RIFFED_VERSION);
         if (ImGui::Button(T("Open download page"), ImVec2(-1, 0))) Update::OpenReleasePage();
@@ -1227,10 +1249,12 @@ static void TabSettings()
 
 static void UpdateNotice()
 {
-    static bool shown = false;
-    if (shown || !g_toggles.updateNotify || !Update::Available() || !Game::InGame()) return;
-    shown = true;
-    Notify(T("RiffedMenu %s is available - see Settings"), Update::Latest().c_str());
+    static std::string shown;                    // once per version, so a release during play still gets a notice
+    if (!g_toggles.updateNotify || !Update::Available() || !Game::InGame()) return;
+    std::string latest = Update::Latest();
+    if (latest == shown) return;
+    shown = latest;
+    Notify(T("RiffedMenu %s is available - see Settings"), latest.c_str());
 }
 
 bool Menu::IsOpen() { return g_open; }

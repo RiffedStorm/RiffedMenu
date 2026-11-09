@@ -31,7 +31,7 @@ std::vector<Entry>& Table()
     I("weather", g.weather); B("spawnInside", g.spawnInside); t.push_back({ "plate", K::Str, g.plate, sizeof(g.plate) });
     F("damageMult", g.damageMult); F("gameSpeed", g.gameSpeed); F("gravity", g.gravity); I("ammoMul", g.ammoMul);
     I("menuKey", g.menuKey); I("noclipKey", g.noclipKey); F("textScale", g.textScale); F("opacity", g.opacity);
-    I("language", g.language); B("updateNotify", g.updateNotify);
+    I("language", g.language); B("updateNotify", g.updateNotify); B("updatePeriodic", g.updatePeriodic); I("mapOpen", g.mapOpen);
 
     AimbotCfg& a = g.aim;
     B("aim.enabled", a.enabled); B("aim.advanced", a.advanced); I("aim.mode", a.mode); I("aim.key", a.key);

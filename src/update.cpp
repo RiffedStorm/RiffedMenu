@@ -8,9 +8,9 @@
 #include <cstdio>
 #include <string>
 
-static volatile LONG g_ready = 0;
+static SRWLOCK g_lock = SRWLOCK_INIT;
+static bool g_ready = false, g_newer = false;
 static std::string g_latest;
-static bool g_newer = false;
 
 static void Parse(const std::string& v, int out[3])
 {
@@ -46,31 +46,62 @@ static std::string Fetch()
     return body;
 }
 
-static DWORD WINAPI Worker(LPVOID)
+static void Check()
 {
-    Sleep(4000);
     std::string body = Fetch();
     auto key = body.find("\"tag_name\"");
-    if (key == std::string::npos) { Log("Update check: no answer"); return 0; }
+    if (key == std::string::npos) { Log("Update check: no answer"); return; }
     auto a = body.find('"', body.find(':', key));
     auto b = a == std::string::npos ? a : body.find('"', a + 1);
-    if (b == std::string::npos) return 0;
-    g_latest = body.substr(a + 1, b - a - 1);
+    if (b == std::string::npos) return;
+    std::string latest = body.substr(a + 1, b - a - 1);
     int have[3], got[3];
+    bool newer = false;
     Parse(RIFFED_VERSION, have);
-    Parse(g_latest, got);
-    for (int i = 0; i < 3 && !g_newer; ++i) {
-        if (got[i] > have[i]) g_newer = true;
+    Parse(latest, got);
+    for (int i = 0; i < 3 && !newer; ++i) {
+        if (got[i] > have[i]) newer = true;
         else if (got[i] < have[i]) break;
     }
-    Log("Update check: this is %s, latest release is %s", RIFFED_VERSION, g_latest.c_str());
-    InterlockedExchange(&g_ready, 1);
-    return 0;
+    AcquireSRWLockExclusive(&g_lock);
+    bool changed = latest != g_latest;
+    g_latest = latest;
+    g_newer = newer;
+    g_ready = true;
+    ReleaseSRWLockExclusive(&g_lock);
+    if (changed) Log("Update check: this is %s, latest release is %s", RIFFED_VERSION, latest.c_str());
+}
+
+static DWORD WINAPI Worker(LPVOID)
+{
+    constexpr DWORD kInterval = 30 * 60 * 1000;
+    Sleep(4000);
+    Check();
+    DWORD last = GetTickCount();
+    for (;;) {
+        Sleep(60000);
+        if (!g_toggles.updateNotify || !g_toggles.updatePeriodic || GetTickCount() - last < kInterval) continue;
+        last = GetTickCount();
+        Check();
+    }
 }
 
 namespace Update {
 void Start() { if (HANDLE t = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr)) CloseHandle(t); }
-bool Available() { return g_ready && g_newer; }
-std::string Latest() { return g_ready ? g_latest : std::string(); }
+bool Available()
+{
+    AcquireSRWLockShared(&g_lock);
+    bool yes = g_ready && g_newer;
+    ReleaseSRWLockShared(&g_lock);
+    return yes;
+}
+
+std::string Latest()
+{
+    AcquireSRWLockShared(&g_lock);
+    std::string tag = g_latest;
+    ReleaseSRWLockShared(&g_lock);
+    return tag;
+}
 void OpenReleasePage() { ShellExecuteA(nullptr, "open", "https://github.com/RiffedStorm/RiffedMenu/releases/latest", nullptr, nullptr, SW_SHOWNORMAL); }
 }

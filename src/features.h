@@ -101,6 +101,8 @@ struct Toggles {
     float opacity   = 0.96f;
     int   language  = 0;    // 0 English, 1 Polish
     bool  updateNotify = true;
+    bool  updatePeriodic = true;  // check again every 30 minutes while playing
+    int   mapOpen = 0;            // 0 as in the story, 1 San Fierro, 2 the whole map
 
     AimbotCfg   aim;
     EspCfg      esp;

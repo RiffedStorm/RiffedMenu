@@ -49,6 +49,8 @@ struct Addresses {
     uintptr_t gunMove;            // CTaskSimpleUseGun::ControlGunMove (thiscall, CVector2D*)
     uintptr_t driveByGate;        // CTaskSimpleGangDriveBy::ProcessPed: `cmp [info], 1; jne end`, bullet weapons only
     uintptr_t removeWeaponModel;  // CPed::RemoveWeaponModel (thiscall model, -1 = any)
+    uintptr_t zonesVisited;       // CTheZones::ZonesVisited: 10x10 bytes, the pause map's fog
+    uintptr_t zonesRevealed;      // CTheZones::ZonesRevealed: how many of those are set
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
@@ -68,7 +70,7 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
                                       0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC,
-                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0 };
+                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0, 0xC30938, 0xC2EFF4 };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -242,7 +244,7 @@ GameVersion DetectVersion()
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
                               &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre,
                               &g_addr.fireInstantHit, &g_addr.cameraAimLine, &g_addr.weaponInfoFor, &g_addr.pedWeaponSkill, &g_addr.animGroups,
-                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel })
+                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel, &g_addr.zonesVisited, &g_addr.zonesRevealed })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -1146,6 +1148,76 @@ void SetVehicleWeapon(int type)
         if (At<int>(ped, 0x70C) != 55) At<int>(ped, 0x70C) = type;
         return;
     }
+}
+
+// The traffic links the intro closes and "Yay Ka-Boom-Boom" reopens.
+static const float kBridgeRoads[][6] = {
+    { -100.7515f, -927.8298f, 18.0000f, -68.3752f, -891.9871f, 14.0000f },
+    { 609.7595f, 327.3437f, 15.8783f, 429.8884f, 616.0168f, 20.2890f },
+    { 317.1688f, 707.7672f, 7.0000f, 437.5726f, 709.0657f, 20.5578f },
+    { 391.1194f, 640.0150f, 7.0000f, 402.2627f, 664.7980f, 18.5098f },
+    { 289.2904f, 636.3991f, 7.8675f, 409.4943f, 702.3849f, 20.0345f },
+    { 300.3153f, 718.7909f, 7.7846f, 316.7906f, 781.0926f, 14.0795f },
+    { 254.9982f, 837.0290f, 10.1731f, 270.7453f, 929.2404f, 30.2553f },
+    { 210.7811f, 939.2068f, 10.9062f, 249.4799f, 959.1111f, 30.2141f },
+    { 230.4545f, 946.0961f, 20.6674f, 255.9772f, 969.2755f, 30.4776f },
+    { 249.4279f, 899.7975f, 10.5871f, 268.6826f, 933.5995f, 30.3975f },
+    { 312.1081f, 694.1089f, 6.0000f, 324.0811f, 733.0005f, 10.0000f },
+    { 324.4526f, 804.9198f, 9.6186f, 332.8747f, 814.3560f, 14.3925f },
+    { 1690.8192f, 376.5103f, 28.1103f, 1730.2230f, 445.2955f, 30.8414f },
+    { 1643.5355f, 227.3723f, 27.4457f, 1673.0623f, 295.5788f, 30.0815f },
+    { 1673.7654f, 388.1013f, 40.2331f, 1815.8619f, 804.9291f, 10.0000f },
+    { 1705.1558f, 308.3448f, 20.0000f, 1710.9475f, 316.4094f, 23.5612f },
+    { -12.7067f, -1522.4554f, 1.0000f, 80.8463f, -1517.1113f, 5.0000f },
+    { -16.3392f, -1532.8817f, 0.0394f, 69.3401f, -1523.7710f, 5.9220f },
+    { 618.7253f, -1189.6063f, 18.0000f, 623.5441f, -1161.9812f, 22.0000f },
+    { -33.4208f, -1341.8403f, 9.0000f, 35.3764f, -1303.9479f, 13.0000f },
+    { -41.2393f, -1385.8701f, 8.0000f, -3.5883f, -1368.8558f, 10.5000f },
+    { -1690.7048f, 539.6102f, 30.3278f, -1100.5674f, 1140.5695f, 50.7350f },
+    { -1799.5405f, 379.7155f, 16.0000f, -1780.1991f, 392.2779f, 18.0000f },
+    { -1092.4293f, 1286.5054f, 30.0000f, -1077.0385f, 1319.4948f, 35.0000f },
+    { -1860.1334f, 314.7891f, 38.0000f, -1638.5630f, 557.4354f, 40.0000f },
+    { -1737.3331f, 455.9431f, 30.3573f, -1710.3633f, 500.6261f, 40.4891f },
+    { -1689.2291f, 513.0995f, 30.2597f, -1679.1241f, 524.8383f, 40.2500f },
+    { -1742.9060f, 500.7302f, 30.4679f, -1650.3119f, 551.8201f, 40.7455f }
+};
+
+// Does what the story does when it opens an area: level 1 is San Fierro, level 2 is Las Venturas too.
+void OpenMapTo(int level)
+{
+    if (level >= 1) Op(0x0777, { S16("BARRIERS1") });      // REMOVE_IPL
+    if (level >= 2) {
+        Op(0x0777, { S16("BARRIERS2") });
+        for (auto& b : kBridgeRoads) Op(0x01E7, { F(b[0]), F(b[1]), F(b[2]), F(b[3]), F(b[4]), F(b[5]) });   // SWITCH_ROADS_ON
+    }
+}
+
+void CloseMapTo(int level)
+{
+    if (level < 1) Op(0x0776, { S16("BARRIERS1") });       // REQUEST_IPL
+    if (level < 2) {
+        Op(0x0776, { S16("BARRIERS2") });
+        for (auto& b : kBridgeRoads) Op(0x01E8, { F(b[0]), F(b[1]), F(b[2]), F(b[3]), F(b[4]), F(b[5]) });   // SWITCH_ROADS_OFF
+    }
+}
+
+bool CanRevealMap() { return g_addr.zonesVisited != 0; }
+
+// area: 0 everything, 1 Los Santos and Red County, 2 San Fierro and its countryside, 3 Las Venturas and the desert.
+void RevealMap(int area)
+{
+    if (!g_addr.zonesVisited) return;
+    uint8_t* cells = (uint8_t*)g_addr.zonesVisited;
+    int revealed = 0;
+    for (int x = 0; x < 10; ++x) {
+        for (int y = 0; y < 10; ++y) {                      // each cell is 600 m, y counted from the south edge
+            int region = x >= 5 && y <= 5 ? 1 : x <= 4 && y <= 7 ? 2 : 3;
+            uint8_t& cell = cells[10 * x + 9 - y];
+            if (area == 0 || area == region) cell = 1;
+            revealed += cell != 0;
+        }
+    }
+    Mem<int>(g_addr.zonesRevealed) = revealed;
 }
 
 void StopDriveBy() { Op(0x0687, { I(PlayerChar()) }); }                 // CLEAR_CHAR_TASKS

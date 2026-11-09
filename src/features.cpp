@@ -85,8 +85,40 @@ static void RiskTick()
 static bool g_driveBy = false;
 bool DriveByAiming() { return g_driveBy; }
 
+// The story's progress through the map lives in one stat, which the game's wanted-level rule reads.
+// Missions set it to fixed values, so it's checked continually and only ever raised.
+static void MapAccess(void* ped)
+{
+    constexpr uint16_t kCityUnlocked = 181;
+    static void* lastPed = nullptr;
+    static int storyValue = -1, applied = 0;
+    static DWORD lastCheck = 0;
+    if (ped != lastPed) { lastPed = ped; storyValue = -1; }
+    if (GetTickCount() - lastCheck < 500) return;
+    lastCheck = GetTickCount();
+
+    int want = g_multiplayer ? 0 : std::clamp(g_toggles.mapOpen, 0, 2);
+    if (want != applied) {
+        if (applied > 0 && storyValue >= 0 && (int)Game::GetStat(kCityUnlocked) == applied) {
+            Game::SetStat(kCityUnlocked, (float)storyValue);
+            Game::CloseMapTo(storyValue);
+        }
+        storyValue = -1;
+        applied = want;
+    }
+    if (want > 0) {
+        int stat = (int)Game::GetStat(kCityUnlocked);
+        if (stat < want) {
+            storyValue = stat;
+            Game::SetStat(kCityUnlocked, (float)want);
+            Game::OpenMapTo(want);
+        }
+    }
+}
+
 static void Gameplay(void* ped, void* veh, float dt)
 {
+    MapAccess(ped);
     GameplayCfg& p = g_toggles.play;
 
     // Things the game stores once: apply on change and shortly after a save is loaded.

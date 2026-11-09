@@ -21,6 +21,7 @@ Press **Insert** in game to open it.
 - **Customize:** a pocket mod shop with paint, paintjobs and parts, plus a showroom camera
 - **Weapons:** every weapon or quick packs, and a damage multiplier
 - **Gameplay:** custom max health, armour and ammo, regeneration, lifesteal, exploding bullets, never busted, stay on bikes, unlimited stamina, free-look drive-by (hold right mouse in the driver's seat), no bullet spread, moving while aiming, sprinting with rifles, any weapon in vehicles and more
+- **Map:** open San Fierro or the whole map early, and reveal any part of the pause map
 - **Combat:** a simple aimbot and 2D box wallhack, both off by default, with Advanced settings if you want them
 - **Missions:** complete or fail the current mission, kill targets, teleport to the objective, or replay any mission without changing your story progress
 - **Outfit:** clothes, haircuts, tattoos and skins, with a mirror camera
