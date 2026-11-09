@@ -34,12 +34,13 @@ struct Addresses {
     uintptr_t bustedJump;         // CGameLogic::Update: `jne` past the "player is arrested" block
     uintptr_t frontEnd;           // FrontEndMenuManager
     uintptr_t arrestStart;        // CTaskSimpleArrestPed::StartAnim (thiscall ped)
+    uintptr_t mouseSens;          // float: CCamera::m_fMouseAccelHorzntl, the game's mouse sensitivity option
     uintptr_t driveByRecentre;    // two ints: how long the driver's drive-by camera waits before swinging back to the side
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
                                       0xB74490, 0xB74494, 0xB6F028, 0xA49960, 0xA8B42C, 0, 0x583530, 0x583480, 0x5E4280,
-                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0, 0 };
+                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0, 0xB6EC1C, 0 };
 // Found by disassembly of gta-sa.exe build 459558 (PE timestamp 0x547CD3A3):
 //   0x46EDD0 reads opcode at [ecx+0x14], sets NOT flag [ecx+0xD2], dispatches via table 0x914BB0
 //   0xC100D0 is the base used by 139 sites of `imul r, r, 0x190`
@@ -53,7 +54,7 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 //   0x769840 is the call in ADD_EXPLOSION; 0x445BA3 is the jne before the only call of ArrestPlayer (0x561200).
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
-                                      0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0x93EBBC };
+                                      0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -225,7 +226,7 @@ GameVersion DetectVersion()
         g_addr.weaponInfo        = Rebase(g_addr.weaponInfo);
         for (uintptr_t* a : { &g_addr.pedPool, &g_addr.vehPool, &g_addr.camera, &g_addr.scriptSpace, &g_addr.activeScripts,
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
-                              &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.driveByRecentre })
+                              &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -1040,6 +1041,17 @@ void StartDriveBy()
 {
     // No target and no aiming point: as with the missions' own drive-bys, the player's mouse aims.
     Op(0x0713, { I(PlayerChar()), I(-1), I(-1), F(0.0f), F(0.0f), F(0.0f), F(300.0f), I(4), I(1), I(100) });   // TASK_DRIVE_BY
+}
+
+void TurnDriveByCamera(int mouseX, int mouseY, float userScale)
+{
+    // Same maths as the game's own mouse camera, so its sensitivity option applies here too.
+    float sens = g_addr.mouseSens ? Mem<float>(g_addr.mouseSens) : 0.0025f;
+    if (!(sens > 0.0f && sens < 0.1f)) sens = 0.0025f;
+    float fov = At<float>(ActiveCam(), 0xB4) / 80.0f;
+    CameraBeta() -= 3.0f * mouseX * fov * sens * userScale;
+    float a = CameraAlpha() - 4.0f * mouseY * fov * sens * 0.6f * userScale;
+    CameraAlpha() = a < -1.2f ? -1.2f : a > 1.0f ? 1.0f : a;
 }
 
 void StopDriveBy() { Op(0x0687, { I(PlayerChar()) }); }                 // CLEAR_CHAR_TASKS

@@ -60,10 +60,29 @@ void LoadGraph()
                 uint16_t ta = Rd<uint16_t>(f, lo), tn = Rd<uint16_t>(f, lo + 2);
                 g_links.push_back(ta < 64 && tn < count[ta] ? base[ta] + tn : 0xFFFFFFFF);
             }
-            if (n.usable) g_grid[Cell(n.y) * kGrid + Cell(n.x)].push_back(base[a] + i);
         }
     }
-    Log("GPS: %d road nodes, %d links", (int)g_nodes.size(), (int)g_links.size());
+
+    // The road data has small islands no road connects to the rest. A marker that snapped to one
+    // could never be routed to, so only the largest connected network can be picked.
+    std::vector<uint32_t> parent(g_nodes.size());
+    for (uint32_t i = 0; i < parent.size(); ++i) parent[i] = i;
+    auto find = [&](uint32_t x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    for (uint32_t i = 0; i < g_nodes.size(); ++i) {
+        const Node& n = g_nodes[i];
+        if (!n.usable) continue;
+        for (int l = 0; l < n.linkCount; ++l) {
+            uint32_t v = g_links[n.firstLink + l];
+            if (v != 0xFFFFFFFF && g_nodes[v].usable) parent[find(i)] = find(v);
+        }
+    }
+    std::vector<uint32_t> size(g_nodes.size(), 0);
+    uint32_t biggest = 0, best = 0;
+    for (uint32_t i = 0; i < g_nodes.size(); ++i)
+        if (g_nodes[i].usable) { uint32_t r = find(i); if (++size[r] > best) { best = size[r]; biggest = r; } }
+    for (uint32_t i = 0; i < g_nodes.size(); ++i)
+        if (g_nodes[i].usable && find(i) == biggest) g_grid[Cell(g_nodes[i].y) * kGrid + Cell(g_nodes[i].x)].push_back(i);
+    Log("GPS: %d road nodes, %d links, main network %d", (int)g_nodes.size(), (int)g_links.size(), (int)best);
     InterlockedExchange(&g_loaded, 1);
 }
 
@@ -203,6 +222,12 @@ bool Destination(CVector& out)
 }
 
 bool g_active = false;
+const char* g_status = "Off";
+
+void SetStatus(const char* s)
+{
+    if (s != g_status) { g_status = s; Log("GPS status: %s", s); }
+}
 
 float DistToRoute(const CVector& me)
 {
@@ -238,13 +263,16 @@ bool Objective(CVector& out) { return ObjectivePos(out); }
 int NodeCount() { return g_loaded ? (int)g_nodes.size() : 0; }
 int RoutePoints() { AcquireSRWLockShared(&g_lock); int n = (int)g_route.size(); ReleaseSRWLockShared(&g_lock); return n; }
 
+const char* Status() { return g_status; }
+
 void Tick()
 {
     g_active = false;
-    if (!g_toggles.gps.enabled || !Game::HasRadar()) return;
+    if (!g_toggles.gps.enabled || !Game::HasRadar()) { SetStatus("Off"); return; }
     Start();
-    if (!g_loaded || Game::ActiveInterior() != 0) return;
-    if (!g_toggles.gps.onFoot && !Game::PlayerVehicle()) return;
+    if (!g_loaded) { SetStatus("Loading road data"); return; }
+    if (Game::ActiveInterior() != 0) { SetStatus("Not available indoors"); return; }
+    if (!g_toggles.gps.onFoot && !Game::PlayerVehicle()) { SetStatus("Get in a vehicle"); return; }
 
     static DWORD last = 0;
     if (GetTickCount() - last < 500) { g_active = g_have; return; }
@@ -253,6 +281,7 @@ void Tick()
     CVector dest;
     if (!Destination(dest)) {
         AcquireSRWLockExclusive(&g_lock); g_route.clear(); g_have = false; ReleaseSRWLockExclusive(&g_lock);
+        SetStatus("No marker on the map");
         return;
     }
     g_active = true;
@@ -260,6 +289,7 @@ void Tick()
     static float lastDx = 1e9f, lastDy = 1e9f;
     bool moved = hypotf(dest.x - lastDx, dest.y - lastDy) > 8.0f;
     bool lost = !g_have || DistToRoute(me) > 45.0f;
+    SetStatus(g_have ? "Route shown" : "Finding a route");
     if (moved || lost) {
         lastDx = dest.x; lastDy = dest.y;
         AcquireSRWLockExclusive(&g_lock);

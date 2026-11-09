@@ -830,6 +830,7 @@ static void TabGameplay()
         ImGui::TableNextColumn(); Toggle(T("Slow motion while aiming"), &p.slowmoAiming);
         ImGui::EndTable();
     }
+    if (p.freeDriveBy) SliderF("##dbsens", &p.driveBySens, 0.1f, 3.0f, T("Drive-by mouse speed x%.2f"));
     if (p.slowmoAiming) SliderF("##slowaim", &p.slowmoScale, 0.1f, 0.9f, T("Aiming speed %.2fx"));
 
     SectionTitle(T("Exploding bullets"));
@@ -1153,6 +1154,7 @@ static void TabSettings()
     ImGui::SameLine(0, 24);
     ImGui::ColorEdit4(T("Mission route"), g_toggles.gps.colMission, ImGuiColorEditFlags_NoInputs);
     SliderF("##gpsw", &g_toggles.gps.width, 1.0f, 8.0f, T("Line width %.1f"));
+    ImGui::TextDisabled(T("Status: %s"), T(GPS::Status()));
 
     SectionTitle(T("Updates"));
     ImGui::Checkbox(T("Tell me when a new version is out"), &g_toggles.updateNotify);

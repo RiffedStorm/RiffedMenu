@@ -181,11 +181,7 @@ static void Gameplay(void* ped, void* veh, float dt)
         driveBy = false;
         if (veh) { Game::StopDriveBy(); Game::SetCurrentWeapon(weaponBefore); }
     }
-    if (driveBy && Game::CameraMode() == 55) {
-        const float sensitivity = 0.0035f;
-        Game::CameraBeta()  -= mouseX * sensitivity;
-        Game::CameraAlpha() = std::clamp(Game::CameraAlpha() - mouseY * sensitivity, -1.2f, 1.0f);
-    }
+    if (driveBy && Game::CameraMode() == 55) Game::TurnDriveByCamera(mouseX, mouseY, p.driveBySens);
 
     // Nitrous
     static void* nitroCar = nullptr;

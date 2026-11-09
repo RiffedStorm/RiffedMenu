@@ -161,6 +161,7 @@ void    SetFreeDriveBy(bool on);
 bool    IsDriver(void* veh);
 void    StartDriveBy();
 void    StopDriveBy();
+void    TurnDriveByCamera(int mouseX, int mouseY, float userScale);
 bool    CanPreventBusted();
 void    SetNeverBusted(bool on);
 void    ClearArrest();
