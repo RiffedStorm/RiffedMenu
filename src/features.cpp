@@ -171,21 +171,40 @@ static void Gameplay(void* ped, void* veh, float dt)
 
     // Free-look drive-by: right mouse starts it, the mouse turns the camera, left mouse fires as usual.
     bool& driveBy = g_driveBy;
-    static int weaponBefore = 0;
+    static int weaponBefore = 0, weaponUsed = 0;
     int mouseX, mouseY;
     Hooks::TakeMouseDelta(mouseX, mouseY);
     int smg = 0;
     { int c, a; Game::WeaponSlot(4, smg, c, a); if (a <= 0) smg = 0; }
-    bool wantDriveBy = p.freeDriveBy && Game::CanFreeDriveBy() && veh && Game::IsDriver(veh) && smg && g_gameFocused &&
-                       (GetAsyncKeyState(VK_RBUTTON) & 0x8000);
+    bool anyWeapon = p.anyVehicleWeapon && !g_multiplayer;
+    static bool anyWeaponApplied = false;
+    if (anyWeaponApplied != anyWeapon) { anyWeaponApplied = anyWeapon; Game::SetDriveByAnyWeapon(anyWeapon); }
+
+    bool aiming = p.freeDriveBy && Game::CanFreeDriveBy() && veh && Game::IsDriver(veh) && g_gameFocused &&
+                  (GetAsyncKeyState(VK_RBUTTON) & 0x8000);
+    int shoot = 0;
+    if (aiming && !driveBy) {
+        if (anyWeapon) {
+            int before = Game::WeaponBeforeCar(), current = Game::CurrentWeapon();
+            if (Game::WeaponFiresFromCar(before) && Game::HasAmmoFor(before)) shoot = before;
+            else if (Game::WeaponFiresFromCar(current) && Game::HasAmmoFor(current)) shoot = current;
+        }
+        if (!shoot && !(anyWeapon && g_toggles.wheel.inVehicles)) shoot = smg;   // with the wheel, Unarmed really means unarmed
+    }
+    bool wantDriveBy = aiming && (driveBy ? Game::HasAmmoFor(weaponUsed) : shoot != 0);
     if (wantDriveBy && !driveBy) {
         driveBy = true;
         weaponBefore = Game::CurrentWeapon();
-        Game::SetCurrentWeapon(smg);
+        weaponUsed = shoot;
+        Game::SetCurrentWeapon(shoot);
         Game::StartDriveBy();
     } else if (!wantDriveBy && driveBy) {
         driveBy = false;
-        if (veh) { Game::StopDriveBy(); Game::SetCurrentWeapon(weaponBefore); }
+        if (veh) {
+            Game::StopDriveBy();
+            if (!anyWeapon || weaponUsed != weaponBefore) Game::SetCurrentWeapon(weaponBefore);
+            if (anyWeapon) Game::HideHeldWeapon();
+        }
     }
     if (driveBy && Game::CameraMode() == 55) Game::TurnDriveByCamera(mouseX, mouseY, p.driveBySens);
 

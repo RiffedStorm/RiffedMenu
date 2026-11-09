@@ -47,6 +47,8 @@ struct Addresses {
     uintptr_t padWalkX;           // CPad::GetPedWalkLeftRight (thiscall)
     uintptr_t padWalkY;           // CPad::GetPedWalkUpDown (thiscall)
     uintptr_t gunMove;            // CTaskSimpleUseGun::ControlGunMove (thiscall, CVector2D*)
+    uintptr_t driveByGate;        // CTaskSimpleGangDriveBy::ProcessPed: `cmp [info], 1; jne end`, bullet weapons only
+    uintptr_t removeWeaponModel;  // CPed::RemoveWeaponModel (thiscall model, -1 = any)
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
@@ -66,7 +68,7 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
                                       0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC,
-                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0 };
+                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0 };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -240,7 +242,7 @@ GameVersion DetectVersion()
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
                               &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre,
                               &g_addr.fireInstantHit, &g_addr.cameraAimLine, &g_addr.weaponInfoFor, &g_addr.pedWeaponSkill, &g_addr.animGroups,
-                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove })
+                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -1087,6 +1089,63 @@ void TurnDriveByCamera(int mouseX, int mouseY, float userScale)
     CameraBeta() -= 3.0f * mouseX * fov * sens * userScale;
     float a = CameraAlpha() - 4.0f * mouseY * fov * sens * 0.6f * userScale;
     CameraAlpha() = a < -1.2f ? -1.2f : a > 1.0f ? 1.0f : a;
+}
+
+// Lets the drive-by task keep going with anything that fires, not just bullet weapons. Melee still ends it.
+void SetDriveByAnyWeapon(bool on)
+{
+    uintptr_t a = g_addr.driveByGate;
+    if (!a || !Matches(a, { 0x83, 0x38, -1, 0x0F, -1 })) return;
+    DWORD old;
+    VirtualProtect((void*)a, 5, PAGE_EXECUTE_READWRITE, &old);
+    Mem<uint8_t>(a + 2) = on ? 0x00 : 0x01;
+    Mem<uint8_t>(a + 4) = on ? 0x84 : 0x85;                 // cmp type, 0; je end   /   cmp type, 1; jne end
+    VirtualProtect((void*)a, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)a, 5);
+}
+
+bool WeaponFiresFromCar(int type)
+{
+    if (type <= 0 || type == 35 || type == 36 || !g_addr.weaponInfoFor) return false;   // rocket launchers neither show nor fire here
+    void* info = ((void*(__cdecl*)(int, int))g_addr.weaponInfoFor)(type, 1);
+    int fireType = info ? At<int>(info, 0) : 0;
+    return fireType >= 1 && fireType <= 3;                  // bullets, projectiles, flames and sprays
+}
+
+bool HasAmmoFor(int type)
+{
+    for (int s = 0; s < 13; ++s) { int t, c, a; WeaponSlot(s, t, c, a); if (t == type) return a > 0; }
+    return false;
+}
+
+// What CJ walked up to the car with, when the game swapped it for an SMG on the way in.
+int WeaponBeforeCar()
+{
+    void* ped = PlayerPed();
+    int saved = ped ? At<int>(ped, 0x70C) : 55;
+    return saved == 55 ? 0 : saved;
+}
+
+void HideHeldWeapon()
+{
+    if (void* ped = PlayerPed()) if (g_addr.removeWeaponModel) ((void(__thiscall*)(void*, int))g_addr.removeWeaponModel)(ped, -1);
+}
+
+// Selects a weapon without putting it in CJ's hands while he's driving, and keeps it when he gets out.
+void SetVehicleWeapon(int type)
+{
+    void* ped = PlayerPed();
+    void* data = ped ? At<void*>(ped, 0x480) : nullptr;
+    if (!data) return;
+    for (int s = 0; s < 13; ++s) {
+        int t, c, a;
+        WeaponSlot(s, t, c, a);
+        if (type == 0 ? s != 0 : t != type) continue;
+        At<int8_t>(ped, 0x718) = (int8_t)s;
+        At<uint8_t>(data, 0x20) = (uint8_t)s;
+        if (At<int>(ped, 0x70C) != 55) At<int>(ped, 0x70C) = type;
+        return;
+    }
 }
 
 void StopDriveBy() { Op(0x0687, { I(PlayerChar()) }); }                 // CLEAR_CHAR_TASKS

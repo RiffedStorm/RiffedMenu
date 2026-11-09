@@ -823,6 +823,9 @@ static void TabGameplay()
         ImGui::BeginDisabled(!Game::CanFreeDriveBy());
         Toggle(T("Free-look drive-by"), &p.freeDriveBy, T("In the driver's seat with a submachine gun: hold right mouse to aim anywhere, left mouse to shoot."));
         ImGui::EndDisabled();
+        ImGui::BeginDisabled(!Game::CanFreeDriveBy() || !p.freeDriveBy);
+        ImGui::TableNextColumn(); Toggle(T("Use any weapon in vehicles"), &p.anyVehicleWeapon, T("Free-look drive-by fires the weapon you carried into the car or picked on the wheel. Melee weapons and rocket launchers can't be used. Grenades can hurt your own car. Needs Free-look drive-by."));
+        ImGui::EndDisabled();
         ImGui::TableNextColumn(); Toggle(T("Stay on bikes"), &p.noFallOffBike, T("CJ doesn't fall off bikes and motorbikes."));
         ImGui::TableNextColumn(); Toggle(T("Unlimited stamina"), &p.unlimitedStamina);
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);
@@ -1153,6 +1156,8 @@ static void TabSettings()
     Toggle(T("Enable weapon wheel"), &g_toggles.wheel.enabled, T("Hold the key, point with the mouse, release to equip."));
     ImGui::SameLine();
     ImGui::Checkbox(T("Slow time while open"), &g_toggles.wheel.slowmo);
+    ImGui::SameLine();
+    ImGui::Checkbox(T("Use in vehicles"), &g_toggles.wheel.inVehicles);
     SliderF("##wscale", &g_toggles.wheel.scale, 0.6f, 1.4f, T("Size x%.2f"));
 
     SectionTitle(T("GPS"));

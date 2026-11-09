@@ -52,6 +52,7 @@ struct GameplayCfg {
     int   damageTaken = 100;     // percent
     bool  explodingBullets = false; int explosionType = 0;
     bool  freeDriveBy = false;
+    bool  anyVehicleWeapon = false;
     float driveBySens = 1.0f;    // on top of the game's own mouse sensitivity
     bool  neverBusted = false, noFallOffBike = false, unlimitedStamina = false, infiniteBreath = false;
     bool  fastReload = false, slowmoAiming = false;
@@ -70,7 +71,7 @@ struct GpsCfg {
     float width = 3.0f;
 };
 
-struct WheelCfg { bool enabled = true, slowmo = true; int key = 0x09; float scale = 1.0f; };
+struct WheelCfg { bool enabled = true, slowmo = true, inVehicles = false; int key = 0x09; float scale = 1.0f; };
 
 struct Toggles {
     bool godMode        = false;

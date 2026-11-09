@@ -95,9 +95,10 @@ IDirect3DTexture9* Icon(IDirect3DDevice9* dev, int type)
 
 void Equip(int sector)
 {
+    auto select = Game::PlayerVehicle() ? Game::SetVehicleWeapon : Game::SetCurrentWeapon;
     Item it;
-    if (sector >= 0 && ItemFor(sector, it)) Game::SetCurrentWeapon(it.type);
-    else if (sector < 0)                    Game::SetCurrentWeapon(0);
+    if (sector >= 0 && ItemFor(sector, it)) select(it.type);
+    else if (sector < 0)                    select(0);
 }
 
 } // namespace
@@ -115,7 +116,7 @@ void ReleaseTextures()
 void Tick()
 {
     bool want = g_toggles.wheel.enabled && (g_gameFocused || g_open);
-    want = want && (GetAsyncKeyState(g_toggles.wheel.key) & 0x8000) && !Game::PlayerVehicle() &&
+    want = want && (GetAsyncKeyState(g_toggles.wheel.key) & 0x8000) && (g_toggles.wheel.inVehicles || !Game::PlayerVehicle()) &&
            !Game::PauseMenuOpen() && !Game::WidescreenOn();
 
     if (want && !g_open) {
