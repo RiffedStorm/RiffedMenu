@@ -4,11 +4,16 @@
 #include "game.h"
 #include "log.h"
 #include "menu.h"
+#include "combat.h"
+#include "config.h"
+#include "update.h"
+#include "wheel.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <dinput.h>
 #include <MinHook.h>
 #include <tlhelp32.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -93,9 +98,11 @@ static bool IsInputMsg(UINT msg)
            msg == WM_CHAR || msg == WM_SYSCHAR || msg == WM_INPUT;
 }
 
+static bool Captured() { return Menu::IsOpen() || Wheel::IsOpen(); }
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
-    if (g_imguiReady && Menu::IsOpen()) {
+    if (g_imguiReady && Captured()) {
         ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
         if (IsInputMsg(msg)) return 0;            // swallow - game must not see it (key-ups still pass through)
         if (msg == WM_SETCURSOR) { SetCursor(nullptr); return TRUE; }
@@ -103,22 +110,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return CallWindowProcW(g_origWndProc, hwnd, msg, wp, lp);
 }
 
+// Roboto (Apache 2.0, shipped with Dear ImGui) is built into the .asi: Polish letters then work on
+// every PC, with no font files to install.
+__asm__(".section .rdata,\"dr\"\n_riffed_font_start:\n.incbin \"Roboto-Medium.ttf\"\n_riffed_font_end:\n.text\n");
+extern "C" const unsigned char riffed_font_start[] __asm__("_riffed_font_start");
+extern "C" const unsigned char riffed_font_end[] __asm__("_riffed_font_end");
+
 static void LoadFonts(float px)
 {
     ImGuiIO& io = ImGui::GetIO();
-    char windir[MAX_PATH];
-    GetWindowsDirectoryA(windir, MAX_PATH);
-    const char* candidates[] = { "segoeui.ttf", "tahoma.ttf", "arial.ttf", "DejaVuSans.ttf" };
-    for (const char* f : candidates) {
-        std::string p = std::string(windir) + "\\Fonts\\" + f;
-        if (GetFileAttributesA(p.c_str()) != INVALID_FILE_ATTRIBUTES && io.Fonts->AddFontFromFileTTF(p.c_str(), px)) {
-            Log("Font: %s @ %.0fpx", p.c_str(), px);
-            return;
-        }
-    }
-    ImFontConfig cfg; cfg.SizePixels = px;
-    io.Fonts->AddFontDefault(&cfg);
-    Log("Font: built-in ProggyClean @ %.0fpx", px);
+    static const ImWchar ranges[] = { 0x0020, 0x00FF, 0x0100, 0x017F, 0x2010, 0x2026, 0 };
+    ImFontConfig cfg;
+    cfg.FontDataOwnedByAtlas = false;
+    io.Fonts->AddFontFromMemoryTTF((void*)riffed_font_start, (int)(riffed_font_end - riffed_font_start), px, &cfg, ranges);
+    Log("Font: built-in Roboto @ %.0fpx", px);
 }
 
 static void InitImGui(IDirect3DDevice9* dev)
@@ -143,6 +148,12 @@ static void InitImGui(IDirect3DDevice9* dev)
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     LoadFonts(17.0f * scale);
     Menu::ApplyStyle(scale);
+    Features::RiskLoad();
+    Config::Init();
+    Update::Start();
+    g_multiplayer = GetModuleHandleA("samp.dll") != nullptr || GetModuleHandleA("netc.dll") != nullptr;
+    if (g_multiplayer) Log("Multiplayer client detected: combat features are disabled");
+    Combat::InstallBulletHook();
 
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX9_Init(dev);
@@ -155,11 +166,12 @@ static void InitImGui(IDirect3DDevice9* dev)
 static void PollToggleKey()
 {
     static bool wasDown = false;
-    bool down = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
+    bool down = (GetAsyncKeyState(g_toggles.menuKey) & 0x8000) != 0;
     if (down && !wasDown && GetForegroundWindow() == g_hwnd) {
         Menu::Toggle();
         ImGui::GetIO().MouseDrawCursor = Menu::IsOpen();
         if (Menu::IsOpen()) ClipCursor(nullptr);
+        else Config::AutoSave();
     }
     wasDown = down;
 }
@@ -174,13 +186,13 @@ static void DrawFrame(IDirect3DDevice9* dev, bool insideScene, const char* via)
         InterlockedIncrement(&g_cntFrames);
         // Game tick: runs on the main thread after the frame's world update,
         // so queued actions and per-frame cheats run here (no exe-specific hook needed).
-        g_gameFocused = GetForegroundWindow() == g_hwnd && !Menu::IsOpen();
+        g_gameFocused = GetForegroundWindow() == g_hwnd && !Captured();
         if (Game::Supported()) Features::Tick();
         PollToggleKey();
         ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
-        Menu::Render();
+        Menu::Render(dev);
         ImGui::EndFrame();
         if (insideScene) {
             ImGui::Render();
@@ -260,6 +272,27 @@ static HRESULT WINAPI hkEndScene(IDirect3DDevice9* dev)
     return o(dev);
 }
 
+using SetTransform_t = HRESULT(WINAPI*)(IDirect3DDevice9*, D3DTRANSFORMSTATETYPE, const D3DMATRIX*);
+
+// Remembers the main 3D camera. Shadow and effect cameras are filtered out by shape: only the
+// main camera is a perspective projection with the same aspect ratio as the screen.
+static HRESULT WINAPI hkSetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE state, const D3DMATRIX* m)
+{
+    auto o = (SetTransform_t)Orig(dev, 44);
+    static D3DMATRIX view{}, proj{};
+    if (m && (state == D3DTS_VIEW || state == D3DTS_PROJECTION)) {
+        (state == D3DTS_VIEW ? view : proj) = *m;
+        bool perspective = proj._44 == 0.0f && proj._34 != 0.0f && proj._11 > 0.0f;
+        if (perspective && g_imguiReady) {
+            ImVec2 d = ImGui::GetIO().DisplaySize;
+            float ratio = proj._22 / proj._11, want = d.y > 0 ? d.x / d.y : 0;
+            if (want > 0 && ratio > want * 0.85f && ratio < want * 1.15f)
+                Game::SetRenderCamera((const float*)&view, (const float*)&proj);
+        }
+    }
+    return o(dev, state, m);
+}
+
 static HRESULT WINAPI hkReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp)
 {
     auto o = (Reset_t)Orig(dev, 16);
@@ -286,6 +319,7 @@ static bool HookDevice(IDirect3DDevice9* dev, const char* source)
     bool ok = SwapSlot(vt, 17, (void*)hkPresent, "Device::Present");
     ok &= SwapSlot(vt, 16, (void*)hkReset, "Device::Reset");
     ok &= SwapSlot(vt, 42, (void*)hkEndScene, "Device::EndScene");
+    if (Game::Supported()) SwapSlot(vt, 44, (void*)hkSetTransform, "Device::SetTransform");
     return ok;
 }
 
@@ -385,13 +419,13 @@ template <int N> struct DIHook {
     static HRESULT WINAPI State(void* self, DWORD size, LPVOID data)
     {
         HRESULT hr = oState(self, size, data);
-        if (SUCCEEDED(hr) && Menu::IsOpen() && data) memset(data, 0, size);
+        if (SUCCEEDED(hr) && Captured() && data) memset(data, 0, size);
         return hr;
     }
     static HRESULT WINAPI Data(void* self, DWORD objSize, LPDIDEVICEOBJECTDATA rgdod, LPDWORD inOut, DWORD flags)
     {
         HRESULT hr = oData(self, objSize, rgdod, inOut, flags);
-        if (SUCCEEDED(hr) && Menu::IsOpen() && inOut) *inOut = 0;
+        if (SUCCEEDED(hr) && Captured() && inOut) *inOut = 0;
         return hr;
     }
 };
@@ -400,8 +434,8 @@ using SetCursorPos_t = BOOL(WINAPI*)(int, int);
 using ClipCursor_t   = BOOL(WINAPI*)(const RECT*);
 static SetCursorPos_t oSetCursorPos = nullptr;
 static ClipCursor_t   oClipCursor   = nullptr;
-static BOOL WINAPI hkSetCursorPos(int x, int y) { return Menu::IsOpen() ? TRUE : oSetCursorPos(x, y); }
-static BOOL WINAPI hkClipCursor(const RECT* r)  { return oClipCursor(Menu::IsOpen() ? nullptr : r); }
+static BOOL WINAPI hkSetCursorPos(int x, int y) { return Captured() ? TRUE : oSetCursorPos(x, y); }
+static BOOL WINAPI hkClipCursor(const RECT* r)  { return oClipCursor(Captured() ? nullptr : r); }
 
 bool Hooks::InstallInputHooks()
 {

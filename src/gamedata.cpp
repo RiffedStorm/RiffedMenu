@@ -1,5 +1,9 @@
 #include "gamedata.h"
+#include "data.h"
+#include "game.h"
 #include "log.h"
+#include <windows.h>
+#include <cstring>
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -140,13 +144,76 @@ void LoadSkins()
     ReadFile("data\\peds.ide", [&](const std::vector<std::string>& t) {
         if (t[0] == "peds") { in = true; return; }
         if (t[0] == "end") { in = false; return; }
-        if (in && t.size() >= 2 && IsNumber(t[0]) && atoi(t[0].c_str()) > 0) g_skins.push_back({ atoi(t[0].c_str()), t[1] });
+        // Placeholders such as special01..10 have no model file: asking the game to load one hangs it forever.
+        if (in && t.size() >= 2 && IsNumber(t[0]) && atoi(t[0].c_str()) > 0 && GameData::ImgHas(Lower(t[1]) + ".dff"))
+            g_skins.push_back({ atoi(t[0].c_str()), t[1] });
     });
 }
 
 } // namespace
 
+namespace {
+
+struct ImgEntry { uint32_t offset, sectors; };
+std::map<std::string, ImgEntry> g_img;
+INIT_ONCE g_imgOnce = INIT_ONCE_STATIC_INIT;
+std::map<int, std::string> g_weaponTxd;
+
+BOOL CALLBACK ReadImgDir(PINIT_ONCE, PVOID, PVOID*)
+{
+    std::ifstream f(GameDir() + "models\\gta3.img", std::ios::binary);
+    char head[8];
+    if (!f.read(head, 8) || memcmp(head, "VER2", 4) != 0) { Log("GameData: gta3.img not readable"); return TRUE; }
+    uint32_t n;
+    memcpy(&n, head + 4, 4);
+    for (uint32_t i = 0; i < n; ++i) {
+        struct { uint32_t off; uint16_t a, b; char name[24]; } e;
+        if (!f.read((char*)&e, 32)) break;
+        g_img[Lower(std::string(e.name, strnlen(e.name, 24)))] = { e.off, (uint32_t)(e.a ? e.a : e.b) };
+    }
+    Log("GameData: gta3.img has %d files", (int)g_img.size());
+    return TRUE;
+}
+
+void EnsureImg() { InitOnceExecuteOnce(&g_imgOnce, ReadImgDir, nullptr, nullptr); }
+
+} // namespace
+
 namespace GameData {
+
+bool ImgHas(const std::string& name) { EnsureImg(); return g_img.empty() || g_img.count(Lower(name)) != 0; }
+
+std::string ImgRead(const std::string& name)
+{
+    EnsureImg();
+    auto it = g_img.find(Lower(name));
+    if (it == g_img.end()) return {};
+    std::ifstream f(GameDir() + "models\\gta3.img", std::ios::binary);
+    std::string data(it->second.sectors * 2048u, '\0');
+    f.seekg((std::streamoff)it->second.offset * 2048);
+    f.read(&data[0], data.size());
+    return data;
+}
+
+std::string WeaponTxd(int type)
+{
+    if (g_weaponTxd.empty()) {
+        bool in = false;
+        ReadFile("data\\default.ide", [&](const std::vector<std::string>& t) {
+            if (t[0] == "weap") { in = true; return; }
+            if (t[0] == "end") { in = false; return; }
+            if (in && t.size() >= 3 && IsNumber(t[0])) g_weaponTxd[atoi(t[0].c_str())] = Lower(t[2]);
+        });
+    }
+    auto it = g_weaponTxd.find(Game::WeaponModelId(type));
+    return it == g_weaponTxd.end() ? std::string() : it->second;
+}
+
+const char* WeaponDisplayName(int type)
+{
+    for (const WeaponEntry& w : kWeapons) if (w.id == type) return w.name;
+    return "?";
+}
 
 bool Load()
 {

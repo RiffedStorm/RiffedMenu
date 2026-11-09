@@ -38,9 +38,15 @@ add_library(RiffedMenu SHARED
     src/features.cpp
     src/hooks.cpp
     src/menu.cpp
-    src/gamedata.cpp)
-target_link_libraries(RiffedMenu PRIVATE imgui minhook d3d9 dinput8 dxguid dwmapi gdi32 imm32)
-target_compile_options(RiffedMenu PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
+    src/gamedata.cpp
+    src/combat.cpp
+    src/config.cpp
+    src/gps.cpp
+    src/i18n.cpp
+    src/update.cpp
+    src/wheel.cpp)
+target_link_libraries(RiffedMenu PRIVATE imgui minhook d3d9 dinput8 dxguid dwmapi gdi32 imm32 winhttp shell32)
+target_compile_options(RiffedMenu PRIVATE -Wa,-I${IMGUI_DIR}/misc/fonts -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 
 # Fully static runtime -> the .asi only depends on system DLLs Wine already ships.
 target_link_options(RiffedMenu PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--enable-stdcall-fixup)

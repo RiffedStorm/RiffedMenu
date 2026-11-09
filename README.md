@@ -6,14 +6,18 @@ Press **Insert** in game to open it.
 
 ## Features
 
-- **Player:** god mode, infinite armour and ammo, never wanted, wanted level, money, noclip (**F7**), jetpack
-- **Vehicle:** spawn any car, bike, plane or boat, optionally straight into the driver's seat and with a custom plate, plus god mode, auto repair, flip and boost
-- **Customize:** a pocket mod shop. Pick paint from the real colour palette, apply paintjobs, and fit spoilers, bumpers, side skirts, wheels, nitro and hydraulics. A showroom camera circles the car while you work.
-- **Outfit:** every piece of clothing, haircut and tattoo, plus a skin changer. A mirror camera shows you the result.
-- **Weapons:** every weapon or quick packs, plus a damage multiplier from x0.1 to one-hit kills
-- **Teleport:** map marker, coordinates, or a list of preset places
-- **World:** time, freeze time, weather, game speed
-- **Stats:** fat, muscle, stamina, driving, flying and weapon skills
+- **Player:** god mode, infinite armour and ammo, never wanted, wanted level, money, noclip, jetpack
+- **Vehicle:** spawn anything, star your favorites and drag them into order, god mode, auto repair, flip, boost, infinite or always-on nitrous with no cooldown
+- **Customize:** a pocket mod shop with paint, paintjobs and parts, plus a showroom camera
+- **Weapons:** every weapon or quick packs, and a damage multiplier
+- **Gameplay:** custom max health, armour and ammo, regeneration, lifesteal, exploding bullets, never busted, stay on bikes, unlimited stamina and more
+- **Combat:** a simple aimbot and 2D box wallhack, both off by default, with Advanced settings if you want them
+- **Missions:** complete or fail the current mission, kill targets, teleport to the objective, or replay any mission without changing your story progress
+- **Outfit:** clothes, haircuts, tattoos and skins, with a mirror camera
+- **Teleport, World, Stats:** places and coordinates, time, weather, game speed, fat, muscle and skills
+- **Weapon wheel:** hold a key, point with the mouse, release to equip
+- **GPS:** the road route to your map marker, drawn on the minimap
+- **Settings:** English or Polish, rebindable keys, multiple named configs with autoload, update notifications
 
 ## Supported game versions
 
@@ -37,19 +41,25 @@ On any other version the menu still opens, but shows a red warning and changes n
 | Key | Action |
 |---|---|
 | Insert | Open or close the menu |
+| Tab (hold) | Weapon wheel |
+| Right mouse (hold) | Aim: the aimbot locks on, if enabled |
 | F7 | Toggle noclip |
 | W A S D | Noclip: move where the camera looks |
 | Space / Ctrl | Noclip: up / down |
 | Shift | Noclip: faster |
 
+You can change the Insert, Tab and F7 keys in Settings.
+
 ## Something not working?
 
 RiffedMenu writes `RiffedMenu.log` in the game folder. Send that file to whoever is helping you.
 
+If an item in the Outfit tab ever crashes your game, RiffedMenu disables that item on the next start. Your settings are in the `RiffedMenu` folder, which it creates by itself.
+
 - **Menu doesn't appear:** check the log for `Game features ENABLED`. If it isn't there, your game version isn't supported.
 - **Overlays:** RivaTuner/Afterburner and Discord overlays are fine, but if something acts up, try turning them off.
 
-Single-player only. Don't use it with SA-MP or MTA. Anything you spawn or change gets saved if you save the game.
+Single-player only. Don't use it with SA-MP or MTA (Combat features switch themselves off there). Anything you spawn or change gets saved if you save the game.
 
 ## Building from source
 
@@ -79,6 +89,13 @@ Most features run through the game's own mission-script engine, the same way CLE
 | `src/game.cpp` | Game access: version detection, addresses, script opcodes |
 | `src/menu.cpp` | The menu UI |
 | `src/features.cpp` | Toggles that run every frame (god mode, noclip…) |
+| `src/combat.cpp` | Aimbot, wallhack, exploding bullets |
+| `src/gps.cpp` | Route finding and minimap drawing |
+| `src/wheel.cpp` | Weapon wheel |
+| `src/config.cpp` | Saved settings |
+| `src/i18n.cpp` | Polish text |
 | `src/hooks.cpp` | Drawing, input blocking, Direct3D hooks |
 | `src/data.h` | Lists of vehicles, weapons, teleports |
 | `src/gamedata.cpp` | Reads car colours, tuning parts, clothes and skins from the game's own data files |
+
+Text is drawn with the [Roboto](https://fonts.google.com/specimen/Roboto) font (Apache 2.0), built into the `.asi`.

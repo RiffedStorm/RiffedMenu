@@ -2,7 +2,7 @@
 
 namespace Menu {
 void ApplyStyle(float scale);
-void Render();      // draws the RiffedMenu window (when open) and toasts
+void Render(void* device);
 bool IsOpen();
 void Toggle();
 }

@@ -39,4 +39,9 @@ const std::vector<ClothingItem>& Clothes();
 const std::vector<PedSkin>& Skins();
 const char* BodyPartName(int part);
 
+std::string ImgRead(const std::string& fileName);   // a file from models\gta3.img, "" if absent (any thread)
+bool ImgHas(const std::string& fileName);
+std::string WeaponTxd(int weaponType);              // texture dictionary that holds the weapon's icon
+const char* WeaponDisplayName(int weaponType);
+
 } // namespace GameData
