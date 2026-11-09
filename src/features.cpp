@@ -82,6 +82,9 @@ static void RiskTick()
 }
 
 // --- gameplay -----------------------------------------------------------------------------
+static bool g_driveBy = false;
+bool DriveByAiming() { return g_driveBy; }
+
 static void Gameplay(void* ped, void* veh, float dt)
 {
     GameplayCfg& p = g_toggles.play;
@@ -99,6 +102,9 @@ static void Gameplay(void* ped, void* veh, float dt)
     static bool driveByApplied = false;
     if (driveByApplied != p.freeDriveBy) { driveByApplied = p.freeDriveBy; Game::SetFreeDriveBy(driveByApplied); }
     if (p.infiniteBreath) Game::RefillBreath();
+    static bool moveAimApplied = false;
+    bool wantMoveAim = p.moveWhileAiming && !g_multiplayer;
+    if (moveAimApplied != wantMoveAim) { moveAimApplied = wantMoveAim; Game::SetMoveWhileAiming(wantMoveAim); }
 
     float& hp = Game::PedHealth(ped);
     float& ar = Game::PedArmour(ped);
@@ -164,7 +170,7 @@ static void Gameplay(void* ped, void* veh, float dt)
     Combat::SpawnPendingExplosions();
 
     // Free-look drive-by: right mouse starts it, the mouse turns the camera, left mouse fires as usual.
-    static bool driveBy = false;
+    bool& driveBy = g_driveBy;
     static int weaponBefore = 0;
     int mouseX, mouseY;
     Hooks::TakeMouseDelta(mouseX, mouseY);

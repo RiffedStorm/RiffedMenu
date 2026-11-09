@@ -22,6 +22,7 @@ struct AimbotCfg {
     bool  prediction = false;
     bool  ignoreInVehicles = false;
     bool  drawFov = false;
+    bool  driveBy = false;       // also aim during free-look drive-by
 };
 
 struct EspCfg {
@@ -54,6 +55,7 @@ struct GameplayCfg {
     float driveBySens = 1.0f;    // on top of the game's own mouse sensitivity
     bool  neverBusted = false, noFallOffBike = false, unlimitedStamina = false, infiniteBreath = false;
     bool  fastReload = false, slowmoAiming = false;
+    bool  noSpread = false, moveWhileAiming = false, armedSprint = false;
     float slowmoScale = 0.4f;
 };
 
@@ -128,6 +130,7 @@ void Queue(std::function<void()> fn);   // run on the next game tick
 void Tick();                            // called once per frame from the Present hook
 void NotifyPush(const char* text);      // show a toast from outside the menu
 void RefreshBody();                     // redraw CJ after fat/muscle changes, as soon as he is on foot
+bool DriveByAiming();                   // the free-look drive-by is running right now
 
 // Crash guard for things that can take the game down. RiskBegin records what is about to be
 // applied; if the game dies before RiskEnd, that item is disabled on the next start.

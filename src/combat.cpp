@@ -120,6 +120,7 @@ void Scan()
 
     const AimbotCfg& a = g_toggles.aim;
     CVector cam = Game::CameraPos(), myPos = Game::EntityPos(me);
+    void* myCar = Game::PlayerVehicle();
     int n = Game::PedPoolSize();
     std::map<void*, bool> alive;
     for (int i = 0; i < n; ++i) {
@@ -168,9 +169,9 @@ void Scan()
         const CVector& aimAt = a.bone == 0 ? t.head : a.bone == 1 ? t.chest : t.pelvis;
         float db = 0, da = 0;
         t.aimAngle = AimError(aimAt, db, da) ? hypotf(db, da) * 57.2958f : 999.0f;
-        t.visible = (t.dist <= a.maxDist && t.aimAngle <= a.fov && ClassAllowed(t) && a.visibleOnly) ? Visible(ped, cam, aimAt, car == nullptr) : true;   // someone in a car is "behind" that car, so cars can't count as cover
+        t.visible = (t.dist <= a.maxDist && t.aimAngle <= a.fov && ClassAllowed(t) && a.visibleOnly) ? Visible(ped, cam, aimAt, car == nullptr && !myCar) : true;   // someone in a car is "behind" that car, and our own car sits in front of the camera
         t.eligible = ClassAllowed(t) && t.dist <= a.maxDist && t.aimAngle <= a.fov && (!a.visibleOnly || t.visible) &&
-                     !(a.ignoreInVehicles && car);
+                     !(a.ignoreInVehicles && car) && !(myCar && car == myCar);
         g_targets.push_back(t);
     }
     g_alive.swap(alive);
@@ -179,11 +180,13 @@ void Scan()
 void RunAimbot()
 {
     const AimbotCfg& a = g_toggles.aim;
-    if (!a.enabled || g_multiplayer || !g_gameFocused || Game::PlayerVehicle()) { g_locked = nullptr; return; }
+    void* myCar = Game::PlayerVehicle();
+    if (!a.enabled || g_multiplayer || !g_gameFocused || (myCar && !(a.driveBy && Features::DriveByAiming()))) { g_locked = nullptr; return; }
     int w = Game::CurrentWeapon();
     if (w < 22 || w > 38) { g_locked = nullptr; return; }       // firearms only
 
     int mode = Game::CameraMode();
+    if (myCar && mode != 55) { g_locked = nullptr; return; }    // the drive-by camera hasn't taken over yet
     bool active = false;
     if (a.mode == 0) active = (GetAsyncKeyState(VK_RBUTTON) & 0x8000) && AimCam(mode);
     else if (a.mode == 1) active = (GetAsyncKeyState(a.key) & 0x8000) != 0;
@@ -203,6 +206,14 @@ void RunAimbot()
 
     CVector p = a.bone == 0 ? best->head : a.bone == 1 ? best->chest : best->pelvis;
     if (a.prediction) { CVector v = Game::EntitySpeed(best->ped); p.x += v.x * 1.5f; p.y += v.y * 1.5f; p.z += v.z * 1.5f; }
+
+    if (myCar) {
+        // The camera moves with the car before the next shot: aim for where the target will be relative to it.
+        void* theirCar = Game::PedCar(best->ped);
+        CVector them = Game::EntitySpeed(theirCar ? theirCar : best->ped), us = Game::EntitySpeed(myCar);
+        float steps = 50.0f * std::clamp(ImGui::GetIO().DeltaTime, 0.0f, 0.05f);
+        p.x += (them.x - us.x) * steps; p.y += (them.y - us.y) * steps; p.z += (them.z - us.z) * steps;
+    }
 
     float db, da;
     if (!AimError(p, db, da)) return;
@@ -242,6 +253,57 @@ void __fastcall hkArrestStart(void* task, void* edx, void* cop)
     if (guard) Game::UndoArrest(victim, state);
 }
 
+// No bullet spread. Only the player's shots are touched, because everything shared goes back after the call.
+using Fire_t = char(__fastcall*)(void*, void*, void*, CVector*, CVector*, void*, CVector*, CVector*, int, int);
+Fire_t oFire = nullptr;
+
+char __fastcall hkFire(void* weapon, void* edx, void* firedBy, CVector* origin, CVector* muzzle, void* target, CVector* targetPos, CVector* start, int a7, int a8)
+{
+    if (!g_toggles.play.noSpread || g_multiplayer || !firedBy || firedBy != Game::PlayerPed())
+        return oFire(weapon, edx, firedBy, origin, muzzle, target, targetPos, start, a7, a8);
+
+    Game::SteadyAim(firedBy);
+    int type = *(int*)weapon;
+    float* accuracy = type >= 25 && type <= 27 ? Game::WeaponAccuracy(firedBy, type) : nullptr;      // shotguns: the pellet cone
+    float saved = accuracy ? *accuracy : 0.0f;
+    if (accuracy) *accuracy = 1000000.0f;
+
+    CVector line;
+    bool freeAim = !target && !targetPos && origin && Game::OnCrosshairLine(start ? *start : *origin, line);   // free aim only, a lock-on has its own target
+    char result = oFire(weapon, edx, firedBy, origin, muzzle, target, targetPos, freeAim ? &line : start, a7, a8);
+
+    if (accuracy) *accuracy = saved;
+    return result;
+}
+
+// The game puts two-handed guns on a movement set whose sprint is just the run, and re-picks the set
+// every frame. Hiding the gun from that one decision gives CJ his normal set while the sprint key is held.
+using AnimGroups_t = void(__fastcall*)(void*, void*);
+AnimGroups_t oAnimGroups = nullptr;
+
+void __fastcall hkAnimGroups(void* ped, void* edx)
+{
+    if (g_toggles.play.armedSprint && !g_multiplayer && ped == Game::PlayerPed() && Game::WantsArmedSprint(ped)) {
+        void*& held = Game::PedWeaponObject(ped);
+        void* saved = held;
+        held = nullptr;
+        oAnimGroups(ped, edx);
+        held = saved;
+        return;
+    }
+    oAnimGroups(ped, edx);
+}
+
+using GunMove_t = char(__fastcall*)(void*, void*, float*);
+GunMove_t oGunMove = nullptr;
+
+char __fastcall hkGunMove(void* task, void* edx, float* wanted)
+{
+    char result = oGunMove(task, edx, wanted);
+    if (g_toggles.play.moveWhileAiming && !g_multiplayer) Game::StartGunMove(task, wanted);
+    return result;
+}
+
 ImU32 Col(const float* c, float alpha = 1.0f) { return ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], c[3] * alpha)); }
 
 } // namespace
@@ -270,6 +332,21 @@ bool InstallBulletHook()
         if (MH_CreateHook(a, (void*)hkArrestStart, (void**)&oArrestStart) == MH_OK && MH_EnableHook(a) == MH_OK)
             Log("Hooked arrest task at %p", a);
         else Log("Arrest hook failed");
+    }
+    if (void* f = Game::FireInstantHitAddress()) {
+        if (MH_CreateHook(f, (void*)hkFire, (void**)&oFire) == MH_OK && MH_EnableHook(f) == MH_OK)
+            Log("Hooked CWeapon::FireInstantHit at %p", f);
+        else Log("Fire hook failed");
+    }
+    if (void* g = Game::AnimGroupsAddress()) {
+        if (MH_CreateHook(g, (void*)hkAnimGroups, (void**)&oAnimGroups) == MH_OK && MH_EnableHook(g) == MH_OK)
+            Log("Hooked CPlayerPed::ProcessAnimGroups at %p", g);
+        else Log("Movement set hook failed");
+    }
+    if (void* m = Game::GunMoveAddress()) {
+        if (MH_CreateHook(m, (void*)hkGunMove, (void**)&oGunMove) == MH_OK && MH_EnableHook(m) == MH_OK)
+            Log("Hooked CTaskSimpleUseGun::ControlGunMove at %p", m);
+        else Log("Gun move hook failed");
     }
     return true;
 }

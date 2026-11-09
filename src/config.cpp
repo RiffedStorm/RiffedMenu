@@ -39,7 +39,7 @@ std::vector<Entry>& Table()
     I("aim.priority", a.priority); B("aim.cops", a.cops); B("aim.enemies", a.enemies); B("aim.attackers", a.attackers);
     B("aim.missionTargets", a.missionTargets); B("aim.civilians", a.civilians); B("aim.visibleOnly", a.visibleOnly);
     B("aim.sticky", a.sticky); B("aim.prediction", a.prediction); B("aim.ignoreInVehicles", a.ignoreInVehicles);
-    B("aim.drawFov", a.drawFov);
+    B("aim.drawFov", a.drawFov); B("aim.driveBy", a.driveBy);
 
     EspCfg& e = g.esp;
     B("esp.enabled", e.enabled); B("esp.advanced", e.advanced); B("esp.onlyAimbot", e.onlyAimbot); B("esp.box", e.box);
@@ -57,7 +57,7 @@ std::vector<Entry>& Table()
     B("play.ammoRegen", p.ammoRegen); I("play.ammoAmount", p.ammoAmount); F("play.ammoEvery", p.ammoEvery);
     B("play.lifesteal", p.lifesteal); F("play.healthPerKill", p.healthPerKill); F("play.armourPerKill", p.armourPerKill);
     I("play.moneyPerKill", p.moneyPerKill); I("play.damageTaken", p.damageTaken); B("play.explodingBullets", p.explodingBullets);
-    I("play.explosionType", p.explosionType); B("play.freeDriveBy", p.freeDriveBy); F("play.driveBySens", p.driveBySens); B("play.neverBusted", p.neverBusted); B("play.noFallOffBike", p.noFallOffBike);
+    I("play.explosionType", p.explosionType); B("play.noSpread", p.noSpread); B("play.moveWhileAiming", p.moveWhileAiming); B("play.armedSprint", p.armedSprint); B("play.freeDriveBy", p.freeDriveBy); F("play.driveBySens", p.driveBySens); B("play.neverBusted", p.neverBusted); B("play.noFallOffBike", p.noFallOffBike);
     B("play.unlimitedStamina", p.unlimitedStamina); B("play.infiniteBreath", p.infiniteBreath); B("play.fastReload", p.fastReload);
     B("play.slowmoAiming", p.slowmoAiming); F("play.slowmoScale", p.slowmoScale);
 

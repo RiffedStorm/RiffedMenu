@@ -162,6 +162,16 @@ bool    IsDriver(void* veh);
 void    StartDriveBy();
 void    StopDriveBy();
 void    TurnDriveByCamera(int mouseX, int mouseY, float userScale);
+void*   FireInstantHitAddress();
+void*   AnimGroupsAddress();
+void    SteadyAim(void* ped);
+float*  WeaponAccuracy(void* ped, int weapon);
+bool    OnCrosshairLine(const CVector& from, CVector& out);
+void    SetMoveWhileAiming(bool on);
+void*   GunMoveAddress();
+void    StartGunMove(void* task, const float* wanted);
+void*&  PedWeaponObject(void* ped);
+bool    WantsArmedSprint(void* ped);       // sprint key held while running on foot, not aiming
 bool    CanPreventBusted();
 void    SetNeverBusted(bool on);
 void    ClearArrest();

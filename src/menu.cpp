@@ -828,6 +828,13 @@ static void TabGameplay()
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);
         ImGui::TableNextColumn(); Toggle(T("Fast reload"), &p.fastReload);
         ImGui::TableNextColumn(); Toggle(T("Slow motion while aiming"), &p.slowmoAiming);
+        ImGui::BeginDisabled(!Game::FireInstantHitAddress());
+        ImGui::TableNextColumn(); Toggle(T("No bullet spread"), &p.noSpread, T("Every shot goes exactly where the crosshair points, shotguns included."));
+        ImGui::EndDisabled();
+        ImGui::TableNextColumn(); Toggle(T("Move while aiming"), &p.moveWhileAiming, T("Walk while aiming and shooting with any firearm, at any weapon skill. Scoped and heavy weapons are left as they are."));
+        ImGui::BeginDisabled(!Game::AnimGroupsAddress());
+        ImGui::TableNextColumn(); Toggle(T("Sprint with rifles and shotguns"), &p.armedSprint, T("Your sprint key also works while carrying an M4, AK-47, rifle or shotgun."));
+        ImGui::EndDisabled();
         ImGui::EndTable();
     }
     if (p.freeDriveBy) SliderF("##dbsens", &p.driveBySens, 0.1f, 3.0f, T("Drive-by mouse speed x%.2f"));
@@ -902,6 +909,9 @@ static void TabCombat()
     Toggle(T("Enable aimbot"), &a.enabled, T("Hold right mouse to aim: the camera locks on to cops and enemies."));
     ImGui::SameLine(ImGui::GetContentRegionAvail().x * 0.72f);
     AdvancedToggle(&a.advanced);
+    ImGui::BeginDisabled(!g_toggles.play.freeDriveBy);
+    Toggle(T("Aim during free-look drive-by"), &a.driveBy, T("Also locks on from the driver's seat. Needs Free-look drive-by on the Gameplay tab."));
+    ImGui::EndDisabled();
     if (a.advanced) {
         const char* modes[] = { T("While aiming (right mouse)"), T("While holding a key"), T("Whenever a weapon is aimed") };
         ImGui::SetNextItemWidth(-1); ImGui::Combo("##amode", &a.mode, modes, IM_ARRAYSIZE(modes));

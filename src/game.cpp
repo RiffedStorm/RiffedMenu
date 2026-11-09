@@ -36,6 +36,17 @@ struct Addresses {
     uintptr_t arrestStart;        // CTaskSimpleArrestPed::StartAnim (thiscall ped)
     uintptr_t mouseSens;          // float: CCamera::m_fMouseAccelHorzntl, the game's mouse sensitivity option
     uintptr_t driveByRecentre;    // two ints: how long the driver's drive-by camera waits before swinging back to the side
+    uintptr_t fireInstantHit;     // CWeapon::FireInstantHit (thiscall, 8 args)
+    uintptr_t cameraAimLine;      // CCamera::Find3rdPersonCamTargetVector (thiscall range, source, &camera, &point)
+    uintptr_t weaponInfoFor;      // CWeaponInfo::GetWeaponInfo (cdecl type, skill)
+    uintptr_t pedWeaponSkill;     // CPed::GetWeaponSkill (thiscall type)
+    uintptr_t animGroups;         // CPlayerPed::ProcessAnimGroups (thiscall): picks the walk/run set each frame
+    uintptr_t pedPad;             // CPed::GetPadFromPlayer (thiscall)
+    uintptr_t padSprint;          // CPad::GetSprint (thiscall), so the player's own key binding applies
+    uintptr_t useGunTask;         // CPedIntelligence::GetTaskUseGun (thiscall)
+    uintptr_t padWalkX;           // CPad::GetPedWalkLeftRight (thiscall)
+    uintptr_t padWalkY;           // CPad::GetPedWalkUpDown (thiscall)
+    uintptr_t gunMove;            // CTaskSimpleUseGun::ControlGunMove (thiscall, CVector2D*)
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
@@ -54,7 +65,8 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 //   0x769840 is the call in ADD_EXPLOSION; 0x445BA3 is the jne before the only call of ArrestPlayer (0x561200).
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
-                                      0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC };
+                                      0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC,
+                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0 };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -226,7 +238,9 @@ GameVersion DetectVersion()
         g_addr.weaponInfo        = Rebase(g_addr.weaponInfo);
         for (uintptr_t* a : { &g_addr.pedPool, &g_addr.vehPool, &g_addr.camera, &g_addr.scriptSpace, &g_addr.activeScripts,
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
-                              &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre })
+                              &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre,
+                              &g_addr.fireInstantHit, &g_addr.cameraAimLine, &g_addr.weaponInfoFor, &g_addr.pedWeaponSkill, &g_addr.animGroups,
+                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -1016,6 +1030,27 @@ bool SetClipMultiplier(float mult)
     return true;
 }
 
+// Lets every aimable firearm be walked with while aiming and firing, as it can at Hitman skill.
+// First-person, heavy and thrown weapons keep their own rules; so do melee weapons, which share the flag bits.
+void SetMoveWhileAiming(bool on)
+{
+    constexpr int kEntries = 80;
+    static uint32_t original[kEntries];
+    static bool saved = false;
+    uint8_t* table = FindWeaponInfo();
+    if (!table) return;
+    for (int i = 0; i < kEntries; ++i) {
+        uint8_t* e = table + i * 0x70;
+        int model = *(int*)(e + 0x0C);
+        if (model != -1 && model != 0 && (model < 321 || model > 372)) break;
+        uint32_t& flags = *(uint32_t*)(e + 0x18);
+        if (!saved) original[i] = flags;
+        bool firearm = *(int*)e != 0 && (original[i] & 1) && !(original[i] & (0x4 | 0x8 | 0x100 | 0x200));
+        flags = on && firearm ? original[i] | 0x30 : original[i];
+    }
+    saved = true;
+}
+
 // --- player extras ------------------------------------------------------------------------
 
 void SetNeverTired(bool on)   { if (InGame()) Op(0x0330, { I(0), I(on ? 1 : 0) }); }
@@ -1067,6 +1102,70 @@ void SetFreeDriveBy(bool on)
     if (!saved) { original[0] = limits[0]; original[1] = limits[1]; saved = true; }
     limits[0] = on ? 0x7FFFFFFF : original[0];
     limits[1] = on ? 0x7FFFFFFF : original[1];
+}
+
+void* FireInstantHitAddress() { return (void*)g_addr.fireInstantHit; }
+void* AnimGroupsAddress()     { return (void*)g_addr.animGroups; }
+
+// The game lowers the player's accuracy to 95 every frame, and that is what scatters the shots.
+void SteadyAim(void* ped) { At<uint8_t>(ped, 0x71A) = 100; }
+
+float* WeaponAccuracy(void* ped, int weapon)
+{
+    int skill = ((uint8_t(__thiscall*)(void*, int))g_addr.pedWeaponSkill)(ped, weapon);
+    void* info = ((void*(__cdecl*)(int, int))g_addr.weaponInfoFor)(weapon, skill);
+    return info ? &At<float>(info, 0x38) : nullptr;
+}
+
+// Moves a shot's starting point onto the line through the crosshair, level with the gun, so the
+// bullet follows that line instead of crossing it from the muzzle.
+bool OnCrosshairLine(const CVector& from, CVector& out)
+{
+    if (!HasCamera()) return false;
+    int mode = CameraMode();
+    if (mode != 53 && mode != 55 && mode != 65) return false;   // the third-person aiming cameras
+    CVector cam, point;
+    ((void(__thiscall*)(void*, float, CVector, CVector*, CVector*))g_addr.cameraAimLine)((void*)g_addr.camera, 100.0f, from, &cam, &point);
+    float x = point.x - cam.x, y = point.y - cam.y, z = point.z - cam.z;
+    float len = sqrtf(x * x + y * y + z * z);
+    if (len < 0.01f) return false;
+    x /= len; y /= len; z /= len;
+    float along = (from.x - cam.x) * x + (from.y - cam.y) * y + (from.z - cam.z) * z;
+    out = { cam.x + x * along, cam.y + y * along, cam.z + z * along };
+    return true;
+}
+
+void* GunMoveAddress() { return (void*)g_addr.gunMove; }
+
+// The gun task builds its movement up by 0.07 per 30 fps frame but cancels anything below 0.1 on the
+// same frame, so above 30 fps it never gets going. Starting it past that point removes the dead end.
+void StartGunMove(void* task, const float* wanted)
+{
+    void* ped = PlayerPed();
+    if (!ped || task != ((void*(__thiscall*)(void*))g_addr.useGunTask)(At<void*>(ped, 0x47C))) return;
+    float& x = At<float>(task, 0x14);
+    float& y = At<float>(task, 0x18);
+    float have = fabsf(x) + fabsf(y), want = fabsf(wanted[0]) + fabsf(wanted[1]);
+    if (have > 0.12f || want < 0.01f) return;
+    x = wanted[0] * 0.15f / want;
+    y = wanted[1] * 0.15f / want;
+}
+
+void*& PedWeaponObject(void* ped) { return At<void*>(ped, 0x4F4); }
+
+bool WantsArmedSprint(void* ped)
+{
+    if (At<uint32_t>(ped, 0x46C) & (0x100 | 0x4000000)) return false;   // in a vehicle or crouching
+    if (!PedWeaponObject(ped)) return false;                            // nothing in hand
+    if (void* intelligence = At<void*>(ped, 0x47C)) {
+        void* gun = ((void*(__thiscall*)(void*))g_addr.useGunTask)(intelligence);
+        if (gun && At<void*>(gun, 0x30)) return false;                   // aiming or firing
+    }
+    void* pad = ((void*(__thiscall*)(void*))g_addr.pedPad)(ped);
+    if (!pad) return false;
+    // Go by the movement keys: the game reports a running state even while CJ stands with sprint held.
+    if (!((short(__thiscall*)(void*))g_addr.padWalkX)(pad) && !((short(__thiscall*)(void*))g_addr.padWalkY)(pad)) return false;
+    return ((uint8_t(__thiscall*)(void*))g_addr.padSprint)(pad) != 0;
 }
 
 bool CanPreventBusted() { return g_addr.bustedJump != 0 && Mem<uint8_t>(g_addr.bustedJump) >= 0x75; }
