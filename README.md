@@ -4,6 +4,13 @@ An in-game trainer menu for **GTA: San Andreas** (the classic PC version). It lo
 
 Press **Insert** in game to open it.
 
+## Preview
+
+| | |
+|---|---|
+| ![Player tab](docs/screenshots/player.png) | ![Gameplay tab](docs/screenshots/gameplay.png) |
+| ![Combat tab with advanced options](docs/screenshots/combat.png) | ![Missions tab](docs/screenshots/missions.png) |
+
 ## Features
 
 - **Player:** god mode, infinite armour and ammo, never wanted, wanted level, money, noclip, jetpack
