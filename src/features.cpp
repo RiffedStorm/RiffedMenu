@@ -317,6 +317,26 @@ void Tick()
         neverWantedApplied = g_toggles.neverWanted;
     }
 
+    // Freeze and Max wanted level. Missions change the game's limit themselves, so it's set again regularly.
+    static DWORD lastWanted = 0;
+    static bool wantedCapped = false;
+    if (!g_toggles.neverWanted && GetTickCount() - lastWanted >= 250) {
+        lastWanted = GetTickCount();
+        int cap = g_toggles.freezeWanted ? std::clamp(g_toggles.frozenWanted, 0, 6)
+                : g_toggles.limitWanted  ? std::clamp(g_toggles.maxWanted, 0, 6) : -1;
+        if (cap >= 0) {
+            wantedCapped = true;
+            Game::SetMaxWantedLevel(cap);                   // a frozen level needs a limit that allows it
+            int level = Game::WantedLevel();
+            if (g_toggles.freezeWanted ? level != cap : level > cap) Game::SetWantedLevel(cap);
+        } else if (wantedCapped) {
+            wantedCapped = false;
+            Game::SetMaxWantedLevel(6);
+        }
+    } else if (g_toggles.neverWanted) {
+        wantedCapped = false;
+    }
+
     void* veh = Game::PlayerVehicle();
     if (veh) {
         if (g_toggles.vehicleGod) {

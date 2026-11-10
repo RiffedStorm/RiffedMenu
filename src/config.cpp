@@ -25,7 +25,7 @@ std::vector<Entry>& Table()
     auto C = [&](const char* n, float* v) { t.push_back({ n, K::Color, v, 0 }); };
 
     B("godMode", g.godMode); B("infiniteArmour", g.infiniteArmour); B("infiniteAmmo", g.infiniteAmmo);
-    B("neverWanted", g.neverWanted); B("noclip", g.noclip); F("noclipSpeed", g.noclipSpeed);
+    B("neverWanted", g.neverWanted); B("freezeWanted", g.freezeWanted); I("frozenWanted", g.frozenWanted); B("limitWanted", g.limitWanted); I("maxWanted", g.maxWanted); B("noclip", g.noclip); F("noclipSpeed", g.noclipSpeed);
     B("vehicleGod", g.vehicleGod); B("autoRepair", g.autoRepair); B("autoFlip", g.autoFlip); B("freezeTime", g.freezeTime);
     I("frozenHour", g.frozenHour); I("frozenMinute", g.frozenMinute); B("lockWeather", g.lockWeather);
     I("weather", g.weather); B("spawnInside", g.spawnInside); t.push_back({ "plate", K::Str, g.plate, sizeof(g.plate) });

@@ -245,9 +245,26 @@ static void TabPlayer()
 
     SectionTitle(T("Wanted level"));
     int wanted = Game::WantedLevel();
+    ImGui::BeginDisabled(g_toggles.freezeWanted);
     ImGui::SetNextItemWidth(-1);
-    if (ImGui::SliderInt("##wanted", &wanted, 0, 6, "%d stars"))
+    if (ImGui::SliderInt("##wanted", &wanted, 0, 6, T("%d stars")))
         Features::Queue([wanted] { Game::SetWantedLevel(wanted); });
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(g_toggles.neverWanted);
+    if (Toggle(T("Freeze wanted level"), &g_toggles.freezeWanted, T("Keeps your wanted level at the chosen number of stars.")) && g_toggles.freezeWanted)
+        g_toggles.frozenWanted = wanted;
+    if (g_toggles.freezeWanted) {
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderInt("##frozenwanted", &g_toggles.frozenWanted, 0, 6, T("%d stars"));
+    }
+    ImGui::BeginDisabled(g_toggles.freezeWanted);
+    Toggle(T("Max wanted level"), &g_toggles.limitWanted, T("Your wanted level can still rise and fall, but never above this many stars."));
+    if (g_toggles.limitWanted) {
+        ImGui::SetNextItemWidth(-1);
+        ImGui::SliderInt("##maxwanted", &g_toggles.maxWanted, 0, 6, T("%d stars"));
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
 
     SectionTitle(T("Money"));
     static int moneyInput = 1000000;

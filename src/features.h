@@ -78,6 +78,10 @@ struct Toggles {
     bool infiniteArmour = false;
     bool infiniteAmmo   = false;
     bool neverWanted    = false;
+    bool freezeWanted   = false;
+    int  frozenWanted   = 0;       // stars
+    bool limitWanted    = false;
+    int  maxWanted      = 6;       // stars
     bool noclip         = false;
     float noclipSpeed   = 20.0f;   // m/s, Shift = x4
     bool vehicleGod     = false;

@@ -16,7 +16,7 @@ Press **Insert** in game to open it.
 
 ## Features
 
-- **Player:** god mode, infinite armour and ammo, never wanted, wanted level, money, noclip, jetpack
+- **Player:** god mode, infinite armour and ammo, never wanted, set, freeze or cap the wanted level, money, noclip, jetpack
 - **Vehicle:** spawn anything, star your favorites and drag them into order, god mode, auto repair, flip, boost, infinite or always-on nitrous with no cooldown
 - **Customize:** a pocket mod shop with paint, paintjobs and parts, plus a showroom camera
 - **Weapons:** every weapon or quick packs, and a damage multiplier
