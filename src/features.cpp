@@ -8,6 +8,7 @@
 #include "hooks.h"
 #include "wheel.h"
 #include <windows.h>
+#include <MinHook.h>
 #include <algorithm>
 #include <fstream>
 #include <set>
@@ -278,6 +279,27 @@ static void ApplyWorld()
 
     if (weatherWasLocked && !g_toggles.lockWeather) Game::ReleaseWeather();
     weatherWasLocked = g_toggles.lockWeather;
+}
+
+// CCamera::Init puts the mouse sensitivity back to the default after the game has loaded the
+// player's own value from gta_sa.set, so the value from before the call is put back afterwards.
+static void(__fastcall* oCameraInit)(void*, void*) = nullptr;
+static void __fastcall hkCameraInit(void* camera, void* unused)
+{
+    float* sens = Game::MouseSensitivity();
+    float before = sens ? *sens : 0.0f;
+    oCameraInit(camera, unused);
+    if (!sens || !g_toggles.keepMouseSens || !(before > 0.0f && before < 1.0f) || *sens == before) return;
+    Log("Kept mouse sensitivity %.6f (the game reset it to %.6f)", before, *sens);
+    *sens = before;
+}
+
+void InstallStartupHooks()
+{
+    void* a = Game::CameraInitAddress();
+    if (!a) return;
+    bool ok = MH_CreateHook(a, (void*)hkCameraInit, (void**)&oCameraInit) == MH_OK && MH_EnableHook(a) == MH_OK;
+    Log("Mouse sensitivity guard %s", ok ? "installed" : "failed");
 }
 
 void Tick()

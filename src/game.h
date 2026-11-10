@@ -151,6 +151,8 @@ void*   SaveGameAddress();
 void*   LoadGameAddress();
 const char* SaveFilePath();
 const char* LoadFilePath();
+void*   CameraInitAddress();
+float*  MouseSensitivity();
 void    RemoveAllWeapons();
 void    ClearPedWeapons(void* ped);
 bool    RedirectWeaponPenalties(void* fn);

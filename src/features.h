@@ -108,6 +108,7 @@ struct Toggles {
     int   language  = 0;    // 0 English, 1 Polish
     bool  updateNotify = true;
     bool  updatePeriodic = true;  // check again every 30 minutes while playing
+    bool  keepMouseSens = true;   // stop the game resetting its mouse sensitivity
     int   mapOpen = 0;            // 0 as in the story, 1 San Fierro, 2 the whole map
 
     AimbotCfg   aim;
@@ -137,6 +138,7 @@ extern bool       g_multiplayer;   // SA-MP / MTA detected: combat features stay
 namespace Features {
 void Queue(std::function<void()> fn);   // run on the next game tick
 void Tick();                            // called once per frame from the Present hook
+void InstallStartupHooks();             // hooks that have to be in place before the game initialises
 void NotifyPush(const char* text);      // show a toast from outside the menu
 void RefreshBody();                     // redraw CJ after fat/muscle changes, as soon as he is on foot
 bool DriveByAiming();                   // the free-look drive-by is running right now

@@ -27,6 +27,7 @@ Press **Insert** in game to open it.
 - **Outfit:** clothes, haircuts, tattoos and skins, with a mirror camera
 - **Teleport, World, Stats:** places and coordinates, time, weather, game speed, fat, muscle and skills
 - **Weapon wheel:** hold a key, point with the mouse, release to equip, scroll to switch between the guns you have collected (remembered per save)
+- **Game fix:** keeps your mouse sensitivity, which the game normally resets to the default
 - **GPS:** the road route to your map marker, drawn on the minimap
 - **Settings:** English or Polish, rebindable keys, multiple named configs with autoload, update notifications
 

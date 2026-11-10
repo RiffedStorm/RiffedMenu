@@ -1201,6 +1201,9 @@ static void TabSettings()
     SliderF("##scale", &g_toggles.textScale, 0.7f, 2.0f, T("Text scale %.2f"));
     SliderF("##alpha", &g_toggles.opacity, 0.4f, 1.0f, T("Opacity %.2f"));
 
+    SectionTitle(T("Game fixes"));
+    Toggle(T("Keep my mouse sensitivity"), &g_toggles.keepMouseSens, T("Stops the game resetting your mouse sensitivity to the default. Uses the value from your own game settings."));
+
     SectionTitle(T("Keys"));
     Keybind(T("Open menu"), &g_toggles.menuKey);
     Keybind(T("Noclip"), &g_toggles.noclipKey);

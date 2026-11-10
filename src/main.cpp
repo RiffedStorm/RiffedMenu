@@ -3,6 +3,7 @@
 #include <MinHook.h>
 #include "game.h"
 #include "hooks.h"
+#include "features.h"
 #include "log.h"
 
 HMODULE g_module = nullptr;
@@ -14,6 +15,7 @@ static DWORD WINAPI InitThread(LPVOID)
 
     if (MH_Initialize() != MH_OK) { Log("MH_Initialize failed - aborting"); return 1; }
 
+    Features::InstallStartupHooks();
     bool input  = Hooks::InstallInputHooks();
     bool render = Hooks::InstallRenderHooks();
     Log("Init done: render=%d input=%d. Press Insert in game.", render, input);
