@@ -19,14 +19,14 @@ Press **Insert** in game to open it.
 - **Player:** god mode, infinite armour and ammo, never wanted, set, freeze or cap the wanted level, money, noclip, jetpack
 - **Vehicle:** spawn anything, star your favorites and drag them into order, god mode, auto repair, flip, boost, infinite or always-on nitrous with no cooldown
 - **Customize:** a pocket mod shop with paint, paintjobs and parts, plus a showroom camera
-- **Weapons:** every weapon or quick packs, and a damage multiplier
-- **Gameplay:** custom max health, armour and ammo, regeneration, lifesteal, exploding bullets, never busted, stay on bikes, unlimited stamina, free-look drive-by (hold right mouse in the driver's seat), no bullet spread, moving while aiming, sprinting with rifles, any weapon in vehicles, always fed and more
+- **Weapons:** every weapon or quick packs, a damage multiplier, all guns on the weapon wheel, remove all weapons
+- **Gameplay:** custom max health, armour and ammo, regeneration, lifesteal, exploding bullets, never busted, keep weapons when wasted or busted, stay on bikes, unlimited stamina, free-look drive-by (hold right mouse in the driver's seat), no bullet spread, moving while aiming, sprinting with rifles, any weapon in vehicles, always fed and more
 - **Map:** open San Fierro or the whole map early, and reveal any part of the pause map
 - **Combat:** a simple aimbot and 2D box wallhack, both off by default, with Advanced settings if you want them
 - **Missions:** complete or fail the current mission, kill targets, teleport to the objective, or replay any mission without changing your story progress
 - **Outfit:** clothes, haircuts, tattoos and skins, with a mirror camera
 - **Teleport, World, Stats:** places and coordinates, time, weather, game speed, fat, muscle and skills
-- **Weapon wheel:** hold a key, point with the mouse, release to equip
+- **Weapon wheel:** hold a key, point with the mouse, release to equip, scroll to switch between the guns you have collected (remembered per save)
 - **GPS:** the road route to your map marker, drawn on the minimap
 - **Settings:** English or Polish, rebindable keys, multiple named configs with autoload, update notifications
 

@@ -4,12 +4,16 @@
 #include "gamedata.h"
 #include "i18n.h"
 #include "log.h"
+#include "config.h"
+#include "data.h"
 #include "imgui.h"
+#include "MinHook.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <map>
 
 // Hold the key to open a radial selector with the game slowed down, point with the mouse, release
@@ -36,15 +40,190 @@ int   g_hover = -1;
 
 struct Item { int slot, type, clip, total; };
 
+// The game keeps one weapon per slot, so everything else the player has held is remembered here,
+// and stored next to each save slot by the hooks below.
+const int kTypes = 47;
+bool g_have[kTypes] = {};
+int  g_shown[kCount] = {};   // gun the scroll wheel landed on this time, applied when the wheel closes
+int  g_pick[kCount] = {};    // last gun chosen in sectors that span two slots
+bool g_hadGuns = false, g_pedGone = false, g_justLoaded = false;
+unsigned g_lastClock = 0;
+
+// Detonator (40) is left out: the game hands it out together with satchel charges.
+const std::vector<int> kSlotGuns[13] = {
+    { 1 }, { 2, 3, 4, 5, 6, 7, 8, 9 }, { 22, 23, 24 }, { 25, 26, 27 }, { 28, 29, 32 }, { 30, 31 }, { 33, 34 },
+    { 35, 36, 37, 38 }, { 16, 17, 18, 39 }, { 41, 42, 43 }, { 10, 11, 12, 13, 14, 15 }, { 44, 45, 46 }, {},
+};
+
+int SlotOf(int type)
+{
+    for (int s = 0; s < 13; ++s)
+        if (std::find(kSlotGuns[s].begin(), kSlotGuns[s].end(), type) != kSlotGuns[s].end()) return s;
+    return -1;
+}
+
+int CatalogAmmo(int type)
+{
+    for (const WeaponEntry& w : kWeapons) if (w.id == type) return w.ammo;
+    return 0;
+}
+
+bool Switching() { return g_toggles.wheel.switchGuns; }
+bool AllGuns()   { return g_toggles.wheel.switchGuns && g_toggles.wheel.allGuns; }
+
+std::vector<int> GunsFor(int sector)
+{
+    std::vector<int> out;
+    for (int s : kSectors[sector].slots) {
+        if (s < 0) continue;
+        for (int t : kSlotGuns[s]) if (g_have[t] || (AllGuns() && CatalogAmmo(t) > 0)) out.push_back(t);
+    }
+    return out;
+}
+
+bool Usable(int slot, int type, int total) { return type != 0 && (total > 0 || slot <= 1 || slot >= 10); }
+
+void ForgetGuns()
+{
+    memset(g_have, 0, sizeof(g_have));
+    memset(g_shown, 0, sizeof(g_shown));
+    memset(g_pick, 0, sizeof(g_pick));
+    g_hadGuns = false;
+}
+
+std::string SlotFile(int slot) { return Config::Dir() + "saves\\slot" + std::to_string(slot) + ".txt"; }
+
+// "...GTASAsf3.b" -> 3
+int SlotFromPath(const char* p)
+{
+    if (!p) return -1;
+    const char* dot = strrchr(p, '.');
+    if (!dot) return -1;
+    const char* q = dot;
+    while (q > p && q[-1] >= '0' && q[-1] <= '9') --q;
+    return q == dot ? -1 : atoi(q);
+}
+
+void Track()
+{
+    // A new game starts the clock again. Loads are handled by the hook, which sets g_justLoaded.
+    unsigned now = Game::ClockMs();
+    bool restarted = g_pedGone || now + 10000 < g_lastClock;
+    g_lastClock = now;
+    g_pedGone = false;
+    if (g_justLoaded) g_justLoaded = false;
+    else if (restarted) { ForgetGuns(); Log("Wheel: new game, collected guns cleared"); }
+
+    bool guns = false;
+    for (int s = 0; s < 13; ++s) {
+        int t, c, a;
+        Game::WeaponSlot(s, t, c, a);
+        if (t > 0 && t < kTypes) g_have[t] = true;
+        if (s >= 2 && s <= 9 && t != 0) guns = true;
+    }
+    if (g_hadGuns && !guns) { ForgetGuns(); Log("Wheel: all guns lost, collected guns cleared"); }   // wasted or busted
+    g_hadGuns = guns;
+}
+
+using SaveFn = char(__cdecl*)(int);
+using LoadFn = char(__cdecl*)(char*);
+SaveFn oSave = nullptr;
+LoadFn oLoad = nullptr;
+
+char __cdecl hkSave(int a)
+{
+    if (Game::PlayerPed()) Track();   // include anything picked up since the last tick
+    char ok = oSave(a);
+    int slot = SlotFromPath(Game::SaveFilePath());
+    if (ok && slot >= 0) {
+        CreateDirectoryA((Config::Dir() + "saves").c_str(), nullptr);
+        std::ofstream f(SlotFile(slot), std::ios::trunc);
+        for (int t = 1; t < kTypes; ++t) if (g_have[t]) f << t << ' ';
+        Log("Wheel: stored collected guns with save slot %d", slot);
+    }
+    return ok;
+}
+
+char __cdecl hkLoad(char* out)
+{
+    char ok = oLoad(out);
+    int slot = SlotFromPath(Game::LoadFilePath());
+    if (ok) {
+        ForgetGuns();
+        g_justLoaded = true;
+        int n = 0, t;
+        std::ifstream f(SlotFile(slot));
+        while (f >> t) if (t > 0 && t < kTypes) { g_have[t] = true; ++n; }
+        Log("Wheel: save slot %d has %d collected guns", slot, n);
+    }
+    return ok;
+}
+
+// Replaces the game's call to ClearWeapons when the player is wasted or busted.
+void __fastcall hkWeaponPenalty(void* ped, void*)
+{
+    const GameplayCfg& p = g_toggles.play;
+    if (!p.keepWeapons || g_multiplayer) { Game::ClearPedWeapons(ped); return; }
+    if (p.keepAmmo) return;
+    for (int s = 2; s <= 9; ++s) { Game::SetSlotAmmo(s, 0); Game::SetSlotClip(s, 0); }
+    Features::Queue([] { Game::SetCurrentWeapon(0); });
+}
+
 bool ItemFor(int sector, Item& it)
 {
+    if (int type = g_shown[sector]) {
+        int slot = SlotOf(type), t, c, a;
+        Game::WeaponSlot(slot, t, c, a);
+        if (!Usable(slot, t, a)) { c = 0; a = CatalogAmmo(type); }   // only All guns lands on an empty slot
+        it = { slot, type, c, std::max(a, 1) };
+        return true;
+    }
+    if (int pick = Switching() ? g_pick[sector] : 0) {
+        int slot = SlotOf(pick), t, c, a;
+        Game::WeaponSlot(slot, t, c, a);
+        if (t == pick && Usable(slot, t, a)) { it = { slot, t, c, a }; return true; }
+    }
     for (int s : kSectors[sector].slots) {
         if (s < 0) continue;
         int t, c, a;
         Game::WeaponSlot(s, t, c, a);
-        if (t != 0 && (a > 0 || s <= 1 || s >= 10)) { it = { s, t, c, a }; return true; }
+        if (Usable(s, t, a)) { it = { s, t, c, a }; return true; }
+    }
+    if (AllGuns()) {
+        auto guns = GunsFor(sector);
+        if (!guns.empty()) { it = { SlotOf(guns[0]), guns[0], 0, CatalogAmmo(guns[0]) }; return true; }
     }
     return false;
+}
+
+// Makes the game hold what the wheel shows for this sector. The category's ammo moves to the new gun.
+void ApplyChoice(int sector)
+{
+    Item it;
+    if (!ItemFor(sector, it)) return;
+    int t, c, a;
+    Game::WeaponSlot(it.slot, t, c, a);
+    bool shown = g_shown[sector] != 0;
+    g_shown[sector] = 0;
+    if (shown) g_pick[sector] = it.type;
+    if (t == it.type && Usable(it.slot, t, a)) return;
+    Game::GiveWeapon(it.type, it.total);
+    Game::SetSlotAmmo(it.slot, it.total);    // picking up over a gun of this class would add the two
+    int nt, nc, na;
+    Game::WeaponSlot(it.slot, nt, nc, na);
+    if (nc > it.total) Game::SetSlotClip(it.slot, it.total);
+    if (Game::PlayerVehicle() && !Features::DriveByAiming()) Game::HideHeldWeapon();   // giving puts it in his hands
+}
+
+void Scroll(int sector, int dir)
+{
+    auto guns = GunsFor(sector);
+    if (guns.size() < 2) return;
+    Item it;
+    if (!ItemFor(sector, it)) return;       // nothing held and no All guns: no ammo to carry over
+    auto at = std::find(guns.begin(), guns.end(), it.type);
+    int i = at == guns.end() ? 0 : (int)(at - guns.begin());
+    g_shown[sector] = guns[(i + dir + (int)guns.size()) % (int)guns.size()];
 }
 
 std::map<int, IDirect3DTexture9*> g_icons;
@@ -97,6 +276,8 @@ void Equip(int sector)
 {
     auto select = Game::PlayerVehicle() ? Game::SetVehicleWeapon : Game::SetCurrentWeapon;
     Item it;
+    for (int i = 0; i < kCount; ++i) if (g_shown[i] && i != sector) ApplyChoice(i);
+    if (sector >= 0 && Switching()) ApplyChoice(sector);
     if (sector >= 0 && ItemFor(sector, it)) select(it.type);
     else if (sector < 0)                    select(0);
 }
@@ -107,6 +288,19 @@ namespace Wheel {
 
 bool IsOpen() { return g_open; }
 
+void PlayerGone() { g_pedGone = true; }
+void ForgetCollected() { ForgetGuns(); }
+
+void InstallSaveHooks()
+{
+    Log("Wheel: keep weapons %s", Game::RedirectWeaponPenalties((void*)hkWeaponPenalty) ? "installed" : "unavailable");
+    void* s = Game::SaveGameAddress(), *l = Game::LoadGameAddress();
+    if (!s || !l) return;
+    bool ok = MH_CreateHook(s, (void*)hkSave, (void**)&oSave) == MH_OK && MH_EnableHook(s) == MH_OK;
+    ok = MH_CreateHook(l, (void*)hkLoad, (void**)&oLoad) == MH_OK && MH_EnableHook(l) == MH_OK && ok;
+    Log("Wheel: save tracking %s", ok ? "installed" : "failed");
+}
+
 void ReleaseTextures()
 {
     for (auto& [k, t] : g_icons) if (t) t->Release();
@@ -115,6 +309,7 @@ void ReleaseTextures()
 
 void Tick()
 {
+    Track();
     bool want = g_toggles.wheel.enabled && (g_gameFocused || g_open);
     want = want && (GetAsyncKeyState(g_toggles.wheel.key) & 0x8000) && (g_toggles.wheel.inVehicles || !Game::PlayerVehicle()) &&
            !Game::PauseMenuOpen() && !Game::WidescreenOn();
@@ -127,6 +322,7 @@ void Tick()
     } else if (!want && g_open) {
         g_open = false;
         if (g_hover != -2) Equip(g_hover);          // -2: the mouse never left the centre, keep the weapon
+        memset(g_shown, 0, sizeof(g_shown));
     }
 }
 
@@ -151,6 +347,9 @@ void Render(void* device)
     } else if (md > r * 0.25f) {
         g_hover = -1;
     }
+
+    float scroll = ImGui::GetIO().MouseWheel;
+    if (Switching() && g_hover >= 0 && scroll != 0.0f) Scroll(g_hover, scroll < 0 ? 1 : -1);
 
     auto* dev = (IDirect3DDevice9*)device;
     const float gap = 0.02f;
@@ -199,6 +398,16 @@ void Render(void* device)
     ImVec2 z1 = ImGui::CalcTextSize(line1), z2 = ImGui::CalcTextSize(line2);
     dl->AddText(ImVec2(c.x - z1.x * 0.5f, c.y - z1.y - 1), IM_COL32_WHITE, line1);
     dl->AddText(ImVec2(c.x - z2.x * 0.5f, c.y + 2), IM_COL32(200, 200, 200, 255), line2);
+    if (Switching() && g_hover >= 0 && ItemFor(g_hover, it)) {
+        auto guns = GunsFor(g_hover);
+        auto at = std::find(guns.begin(), guns.end(), it.type);
+        if (guns.size() > 1 && at != guns.end()) {
+            char line3[32];
+            snprintf(line3, sizeof(line3), T("Scroll %d/%d"), (int)(at - guns.begin()) + 1, (int)guns.size());
+            ImVec2 z3 = ImGui::CalcTextSize(line3);
+            dl->AddText(ImVec2(c.x - z3.x * 0.5f, c.y + z2.y + 4), IM_COL32(245, 140, 41, 255), line3);
+        }
+    }
     dl->AddCircleFilled(m, 4.0f, IM_COL32(255, 255, 255, 230));
 }
 

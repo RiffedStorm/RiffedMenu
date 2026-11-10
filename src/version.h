@@ -1,2 +1,2 @@
 #pragma once
-#define RIFFED_VERSION "1.8.0"
+#define RIFFED_VERSION "1.9.0"

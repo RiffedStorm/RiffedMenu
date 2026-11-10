@@ -57,6 +57,7 @@ struct GameplayCfg {
     bool  neverBusted = false, noFallOffBike = false, unlimitedStamina = false, infiniteBreath = false;
     bool  fastReload = false, slowmoAiming = false, alwaysFed = false;
     bool  noSpread = false, moveWhileAiming = false, armedSprint = false;
+    bool  keepWeapons = false, keepAmmo = true;   // when wasted or busted
     float slowmoScale = 0.4f;
 };
 
@@ -71,7 +72,7 @@ struct GpsCfg {
     float width = 3.0f;
 };
 
-struct WheelCfg { bool enabled = true, slowmo = true, inVehicles = false; int key = 0x09; float scale = 1.0f; };
+struct WheelCfg { bool enabled = true, slowmo = true, inVehicles = false, switchGuns = true, allGuns = false; int key = 0x09; float scale = 1.0f; };
 
 struct Toggles {
     bool godMode        = false;

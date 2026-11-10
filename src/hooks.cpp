@@ -155,6 +155,7 @@ static void InitImGui(IDirect3DDevice9* dev)
     g_multiplayer = GetModuleHandleA("samp.dll") != nullptr || GetModuleHandleA("netc.dll") != nullptr;
     if (g_multiplayer) Log("Multiplayer client detected: combat features are disabled");
     Combat::InstallBulletHook();
+    Wheel::InstallSaveHooks();
 
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX9_Init(dev);

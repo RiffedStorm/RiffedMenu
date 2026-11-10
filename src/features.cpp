@@ -288,7 +288,7 @@ void Tick()
     ReleaseSRWLockExclusive(&g_queueLock);
 
     void* ped = Game::PlayerPed();
-    if (!ped) return;   // drop queued actions while no game is loaded
+    if (!ped) { Wheel::PlayerGone(); return; }   // drop queued actions while no game is loaded
     for (auto& fn : pending) fn();
     RiskTick();
 

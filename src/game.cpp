@@ -57,6 +57,13 @@ struct Addresses {
     uintptr_t weaveLoopTest;      // the two "have the angles settled?" tests in that function
     uintptr_t lineClear;          // CWorld::GetIsLineOfSightClear (cdecl from, to, 7 flags)
     uintptr_t lineHit;            // CWorld::ProcessLineOfSight (cdecl from, to, colpoint, entity, 8 flags)
+    uintptr_t saveGame;           // CGenericGameStorage::GenericSave (cdecl int, non-zero on success)
+    uintptr_t loadGame;           // CGenericGameStorage::GenericLoad (cdecl bool*, non-zero on success)
+    uintptr_t savePath;           // file GenericSave writes, ends in the slot number + ".b"
+    uintptr_t loadPath;           // file GenericLoad reads
+    uintptr_t clearWeapons;       // CPed::ClearWeapons (thiscall, no arguments)
+    uintptr_t stripWasted;        // CGameLogic::Update, the call to ClearWeapons after dying
+    uintptr_t stripBusted;        // CGameLogic::Update, the call to ClearWeapons after an arrest
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
@@ -76,7 +83,7 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
                                       0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC,
-                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0, 0xC30938, 0xC2EFF4, 0xC0FD74, 0x4347F0, 0x4349BF, 0x583750, 0x5849C0 };
+                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0, 0xC30938, 0xC2EFF4, 0xC0FD74, 0x4347F0, 0x4349BF, 0x583750, 0x5849C0, 0x5ECD50, 0x5ED120, 0xCA3B50, 0xCA2D60, 0x602640, 0x445CD7, 0x446086 };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -250,7 +257,7 @@ GameVersion DetectVersion()
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
                               &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre,
                               &g_addr.fireInstantHit, &g_addr.cameraAimLine, &g_addr.weaponInfoFor, &g_addr.pedWeaponSkill, &g_addr.animGroups,
-                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel, &g_addr.zonesVisited, &g_addr.zonesRevealed, &g_addr.clockMs, &g_addr.weaveAngle, &g_addr.weaveLoopTest, &g_addr.lineClear, &g_addr.lineHit })
+                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel, &g_addr.zonesVisited, &g_addr.zonesRevealed, &g_addr.clockMs, &g_addr.weaveAngle, &g_addr.weaveLoopTest, &g_addr.lineClear, &g_addr.lineHit, &g_addr.saveGame, &g_addr.loadGame, &g_addr.savePath, &g_addr.loadPath, &g_addr.clearWeapons, &g_addr.stripWasted, &g_addr.stripBusted })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -1034,6 +1041,7 @@ void WeaponSlot(int slot, int& type, int& clip, int& total)
 }
 
 void SetSlotAmmo(int slot, int total) { At<int>((uint8_t*)PlayerPed() + off::PedWeapons + slot * 0x1C, 0xC) = total; }
+void SetSlotClip(int slot, int clip)  { At<int>((uint8_t*)PlayerPed() + off::PedWeapons + slot * 0x1C, 8) = clip; }
 
 int ActiveSlot()
 {
@@ -1308,6 +1316,29 @@ bool OnCrosshairLine(const CVector& from, CVector& out)
 
 void* LineClearAddress() { return (void*)g_addr.lineClear; }
 void* LineHitAddress()   { return (void*)g_addr.lineHit; }
+void* SaveGameAddress()  { return (void*)g_addr.saveGame; }
+void* LoadGameAddress()  { return (void*)g_addr.loadGame; }
+const char* SaveFilePath() { return (const char*)g_addr.savePath; }
+const char* LoadFilePath() { return (const char*)g_addr.loadPath; }
+
+void RemoveAllWeapons() { if (InGame()) Op(0x048F, { I(PlayerChar()) }); }   // REMOVE_ALL_CHAR_WEAPONS
+void ClearPedWeapons(void* ped) { ((void(__thiscall*)(void*))g_addr.clearWeapons)(ped); }
+
+// Sends the game's two "take the player's weapons" calls to fn (fastcall ped, unused).
+bool RedirectWeaponPenalties(void* fn)
+{
+    uintptr_t sites[] = { g_addr.stripWasted, g_addr.stripBusted };
+    for (uintptr_t s : sites)
+        if (!s || !g_addr.clearWeapons || !Matches(s, { 0xE8 }) || s + 5 + Mem<int32_t>(s + 1) != g_addr.clearWeapons) return false;
+    for (uintptr_t s : sites) {
+        DWORD old;
+        VirtualProtect((void*)s, 5, PAGE_EXECUTE_READWRITE, &old);
+        Mem<int32_t>(s + 1) = (int32_t)((uintptr_t)fn - (s + 5));
+        VirtualProtect((void*)s, 5, old, &old);
+        FlushInstructionCache(GetCurrentProcess(), (void*)s, 5);
+    }
+    return true;
+}
 void* WeaveAngleAddress() { return (void*)g_addr.weaveAngle; }
 
 // The traffic code repeats until two angles stop changing, but tests "not equal" in a way that is

@@ -669,6 +669,13 @@ static void TabWeapons()
         }
     }
 
+    if (Toggle(T("All guns"), &g_toggles.wheel.allGuns, T("Every gun can be picked on the weapon wheel with the scroll wheel, collected or not. Empty categories come with ammo.")) && g_toggles.wheel.allGuns)
+        g_toggles.wheel.switchGuns = true;
+    if (ImGui::Button(T("Remove all weapons"), ImVec2(-1, 0))) {
+        Features::Queue([] { Game::RemoveAllWeapons(); Wheel::ForgetCollected(); });
+        Notify(T("All weapons removed"));
+    }
+
     if (ImGui::Button(T("Gangster pack"), ImVec2(HalfWidth(), 0))) {
         Features::Queue([m = ammoMul] { for (int t : {5, 24, 26, 28, 30, 18}) Game::GiveWeapon(t, 500 * m); });
         Notify(T("Gangster pack given"));
@@ -871,6 +878,11 @@ static void TabGameplay()
         ImGui::TableNextColumn(); Toggle(T("Unlimited stamina"), &p.unlimitedStamina);
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);
         ImGui::TableNextColumn(); Toggle(T("Always fed"), &p.alwaysFed, T("CJ never gets hungry, so he doesn't lose fat, muscle or health from not eating."));
+        ImGui::TableNextColumn(); Toggle(T("Keep weapons when wasted or busted"), &p.keepWeapons, T("You still pay the hospital or police fee."));
+        ImGui::TableNextColumn();
+        ImGui::BeginDisabled(!p.keepWeapons);
+        Toggle(T("Keep ammo"), &p.keepAmmo, T("When off, you keep the guns but they stay empty until you find ammo for them."));
+        ImGui::EndDisabled();
         ImGui::TableNextColumn(); Toggle(T("Fast reload"), &p.fastReload);
         ImGui::TableNextColumn(); Toggle(T("Slow motion while aiming"), &p.slowmoAiming);
         ImGui::BeginDisabled(!Game::FireInstantHitAddress());
@@ -1200,6 +1212,7 @@ static void TabSettings()
     ImGui::Checkbox(T("Slow time while open"), &g_toggles.wheel.slowmo);
     ImGui::SameLine();
     ImGui::Checkbox(T("Use in vehicles"), &g_toggles.wheel.inVehicles);
+    Toggle(T("Switch weapons with the scroll wheel"), &g_toggles.wheel.switchGuns, T("Point at a weapon in the wheel and scroll to swap it for another gun of that type you have collected. Your ammo carries over."));
     SliderF("##wscale", &g_toggles.wheel.scale, 0.6f, 1.4f, T("Size x%.2f"));
 
     SectionTitle(T("GPS"));
