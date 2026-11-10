@@ -867,6 +867,7 @@ static void TabGameplay()
         ImGui::BeginDisabled(!Game::CanPreventBusted());
         Toggle(T("Never get busted"), &p.neverBusted, T("Cops can't arrest you."));
         ImGui::EndDisabled();
+        ImGui::TableNextColumn(); Toggle(T("Stay on bikes"), &p.noFallOffBike, T("CJ doesn't fall off bikes and motorbikes."));
         ImGui::TableNextColumn();
         ImGui::BeginDisabled(!Game::CanFreeDriveBy());
         Toggle(T("Free-look drive-by"), &p.freeDriveBy, T("In the driver's seat with a submachine gun: hold right mouse to aim anywhere, left mouse to shoot."));
@@ -874,7 +875,6 @@ static void TabGameplay()
         ImGui::BeginDisabled(!Game::CanFreeDriveBy() || !p.freeDriveBy);
         ImGui::TableNextColumn(); Toggle(T("Use any weapon in vehicles"), &p.anyVehicleWeapon, T("Free-look drive-by fires the weapon you carried into the car or picked on the wheel. Melee weapons and rocket launchers can't be used. Grenades can hurt your own car. Needs Free-look drive-by."));
         ImGui::EndDisabled();
-        ImGui::TableNextColumn(); Toggle(T("Stay on bikes"), &p.noFallOffBike, T("CJ doesn't fall off bikes and motorbikes."));
         ImGui::TableNextColumn(); Toggle(T("Unlimited stamina"), &p.unlimitedStamina);
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);
         ImGui::TableNextColumn(); Toggle(T("Always fed"), &p.alwaysFed, T("CJ never gets hungry, so he doesn't lose fat, muscle or health from not eating."));
