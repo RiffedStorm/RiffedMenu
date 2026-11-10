@@ -878,12 +878,12 @@ static void TabGameplay()
         ImGui::TableNextColumn(); Toggle(T("Unlimited stamina"), &p.unlimitedStamina);
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);
         ImGui::TableNextColumn(); Toggle(T("Always fed"), &p.alwaysFed, T("CJ never gets hungry, so he doesn't lose fat, muscle or health from not eating."));
+        ImGui::TableNextColumn(); Toggle(T("Fast reload"), &p.fastReload);
         ImGui::TableNextColumn(); Toggle(T("Keep weapons when wasted or busted"), &p.keepWeapons, T("You still pay the hospital or police fee."));
         ImGui::TableNextColumn();
         ImGui::BeginDisabled(!p.keepWeapons);
         Toggle(T("Keep ammo"), &p.keepAmmo, T("When off, you keep the guns but they stay empty until you find ammo for them."));
         ImGui::EndDisabled();
-        ImGui::TableNextColumn(); Toggle(T("Fast reload"), &p.fastReload);
         ImGui::TableNextColumn(); Toggle(T("Slow motion while aiming"), &p.slowmoAiming);
         ImGui::BeginDisabled(!Game::FireInstantHitAddress());
         ImGui::TableNextColumn(); Toggle(T("No bullet spread"), &p.noSpread, T("Every shot goes exactly where the crosshair points, shotguns included."));
