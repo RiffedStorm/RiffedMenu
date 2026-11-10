@@ -1,5 +1,6 @@
 #include "game.h"
 #include "log.h"
+#include "features.h"
 #include <windows.h>
 #include <cctype>
 #include <cmath>
@@ -51,6 +52,11 @@ struct Addresses {
     uintptr_t removeWeaponModel;  // CPed::RemoveWeaponModel (thiscall model, -1 = any)
     uintptr_t zonesVisited;       // CTheZones::ZonesVisited: 10x10 bytes, the pause map's fog
     uintptr_t zonesRevealed;      // CTheZones::ZonesRevealed: how many of those are set
+    uintptr_t clockMs;            // CTimer::m_snTimeInMilliseconds
+    uintptr_t weaveAngle;         // CCarCtrl::FindAngleToWeaveThroughTraffic (cdecl car, other, angle, angle, distance)
+    uintptr_t weaveLoopTest;      // the two "have the angles settled?" tests in that function
+    uintptr_t lineClear;          // CWorld::GetIsLineOfSightClear (cdecl from, to, 7 flags)
+    uintptr_t lineHit;            // CWorld::ProcessLineOfSight (cdecl from, to, colpoint, entity, 8 flags)
 };
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
@@ -70,7 +76,7 @@ static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0x
 static const Addresses kSteam2014 = { 0x46EDD0, 0xC100D0, 0xC36858, 0, 0xD23768, 0xB12818, 0xD164E8,
                                       0xC018A8, 0xC018AC, 0xBFC448, 0xAC12D0, 0xB02D98, 0xABF01C, 0x5A0600, 0x5A0560, 0x5FBE20,
                                       0x76E0D0, 0x769840, 0x445BA3, 0xC33938, 0x6B8890, 0xBFC05C, 0x93EBBC,
-                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0, 0xC30938, 0xC2EFF4 };
+                                      0x772D30, 0x5217D0, 0x7770D0, 0x5FF7C0, 0x6263C0, 0x626000, 0x551110, 0x61D230, 0x550590, 0x550640, 0x63DAC0, 0x64EBBD, 0x5FF5D0, 0xC30938, 0xC2EFF4, 0xC0FD74, 0x4347F0, 0x4349BF, 0x583750, 0x5849C0 };
 
 static GameVersion g_version = GameVersion::Unknown;
 static Addresses   g_addr{};
@@ -244,7 +250,7 @@ GameVersion DetectVersion()
                               &g_addr.onMissionVar, &g_addr.worldToRadar, &g_addr.radarToScreen, &g_addr.boneFn,
                               &g_addr.bulletImpact, &g_addr.addExplosion, &g_addr.bustedJump, &g_addr.frontEnd, &g_addr.arrestStart, &g_addr.mouseSens, &g_addr.driveByRecentre,
                               &g_addr.fireInstantHit, &g_addr.cameraAimLine, &g_addr.weaponInfoFor, &g_addr.pedWeaponSkill, &g_addr.animGroups,
-                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel, &g_addr.zonesVisited, &g_addr.zonesRevealed })
+                              &g_addr.pedPad, &g_addr.padSprint, &g_addr.useGunTask, &g_addr.padWalkX, &g_addr.padWalkY, &g_addr.gunMove, &g_addr.driveByGate, &g_addr.removeWeaponModel, &g_addr.zonesVisited, &g_addr.zonesRevealed, &g_addr.clockMs, &g_addr.weaveAngle, &g_addr.weaveLoopTest, &g_addr.lineClear, &g_addr.lineHit })
             *a = Rebase(*a);
         memset(g_script, 0, sizeof(g_script));
         memcpy(g_script + 0x08, "riffed", 7);   // m_szName, shows up in game debug output
@@ -451,6 +457,15 @@ static float SpawnDistance(int model)
     }
 }
 
+static void WarpIntoSpawned(int car, int model)
+{
+    if (InGame() && Op(0x056E, { I(car) })) {                        // DOES_VEHICLE_EXIST
+        Op(0x036A, { I(PlayerChar()), I(car) });                     // WARP_CHAR_INTO_CAR
+        Op(0x01C3, { I(car) });                                      // MARK_CAR_AS_NO_LONGER_NEEDED
+    }
+    ReleaseModels({ model });
+}
+
 void SpawnVehicle(int model, bool warpInside, const char* plate)
 {
     if (!InGame() || ActiveInterior() != 0) return;
@@ -461,10 +476,19 @@ void SpawnVehicle(int model, bool warpInside, const char* plate)
     float x = VarF(2), y = VarF(3), z = VarF(4);
     Op(0x0172, { I(ch), V(5) });                                     // GET_CHAR_HEADING
     float heading = VarF(5);
+    bool leaveFirst = warpInside && PlayerCar() >= 0;
+    if (leaveFirst) Op(0x0362, { I(ch), F(x), F(y), F(z + 3.0f) });  // WARP_CHAR_FROM_CAR_TO_COORD
     Op(0x00A5, { I(model), F(x), F(y), F(z), V(6) });                // CREATE_CAR -> var6
     int car = VarI(6);
     Op(0x0175, { I(car), F(heading) });                              // SET_CAR_HEADING
     Op(0x020A, { I(car), I(1) });                                    // LOCK_CAR_DOORS 1 = unlocked (tank, some planes spawn locked)
+    if (leaveFirst) {
+        // Warping straight between cars leaves the camera on the old one. Once CJ has been out for a
+        // frame the camera follows him again, and getting in behaves normally.
+        Features::Queue([car, model] { Features::Queue([car, model] { WarpIntoSpawned(car, model); }); });
+        Log("Spawned model %d handle %d at %.1f %.1f %.1f (leaving the old car first)", model, car, x, y, z);
+        return;
+    }
     if (warpInside) Op(0x036A, { I(ch), I(car) });                   // WARP_CHAR_INTO_CAR
     Op(0x01C3, { I(car) });                                          // MARK_CAR_AS_NO_LONGER_NEEDED
     ReleaseModels({ model });
@@ -843,6 +867,7 @@ void*   PedLastDamager(void* ped) { return At<void*>(ped, 0x764); }
 void*   PedCar(void* ped)         { return (At<uint32_t>(ped, 0x46C) & 0x100) ? At<void*>(ped, off::PedVehicle) : nullptr; }
 CVector EntityPos(void* e)        { void* m = At<void*>(e, 0x14); return m ? At<CVector>(m, 0x30) : At<CVector>(e, 4); }
 CVector EntitySpeed(void* e)      { return At<CVector>(e, 0x44); }
+CVector EntityForward(void* e)    { void* m = At<void*>(e, 0x14); return m ? At<CVector>(m, 0x10) : CVector{ 0.0f, 1.0f, 0.0f }; }
 
 bool PedBone(void* ped, int bone, CVector& out)
 {
@@ -1060,6 +1085,8 @@ void SetMoveWhileAiming(bool on)
 void SetNeverTired(bool on)   { if (InGame()) Op(0x0330, { I(0), I(on ? 1 : 0) }); }
 void SetFastReload(bool on)   { if (InGame()) Op(0x0331, { I(0), I(on ? 1 : 0) }); }
 void SetStayOnBike(bool on)   { if (InGame()) Op(0x08C6, { I(PlayerChar()), I(on ? 1 : 0) }); }
+void ClearHunger() { Mem<uint16_t>(g_addr.players + 0x144) = 0; }   // CPlayerInfo::m_nNumHoursDidntEat
+
 void RefillBreath()
 {
     // Stays topped up at the highest value seen, which is the full bar for CJ's current lung stat.
@@ -1088,6 +1115,9 @@ void TurnDriveByCamera(int mouseX, int mouseY, float userScale)
     float sens = g_addr.mouseSens ? Mem<float>(g_addr.mouseSens) : 0.0025f;
     if (!(sens > 0.0f && sens < 0.1f)) sens = 0.0025f;
     float fov = At<float>(ActiveCam(), 0xB4) / 80.0f;
+    if (!std::isfinite(CameraBeta())) CameraBeta() = 0.0f;     // one bad value here would stick and hang the game's line checks
+    if (!std::isfinite(CameraAlpha())) CameraAlpha() = 0.0f;
+    if (!std::isfinite(fov)) return;
     CameraBeta() -= 3.0f * mouseX * fov * sens * userScale;
     float a = CameraAlpha() - 4.0f * mouseY * fov * sens * 0.6f * userScale;
     CameraAlpha() = a < -1.2f ? -1.2f : a > 1.0f ? 1.0f : a;
@@ -1265,6 +1295,29 @@ bool OnCrosshairLine(const CVector& from, CVector& out)
     out = { cam.x + x * along, cam.y + y * along, cam.z + z * along };
     return true;
 }
+
+void* LineClearAddress() { return (void*)g_addr.lineClear; }
+void* LineHitAddress()   { return (void*)g_addr.lineHit; }
+void* WeaveAngleAddress() { return (void*)g_addr.weaveAngle; }
+
+// The traffic code repeats until two angles stop changing, but tests "not equal" in a way that is
+// also true for a NaN, so one bad number hangs the game. These tests now treat a NaN as settled.
+bool FixWeaveLoop()
+{
+    uintptr_t a = g_addr.weaveLoopTest;
+    if (!a || !Matches(a, { 0xF6, 0xC4, 0x44, 0x7A, -1 }) || !Matches(a + 0x0E, { 0xF6, 0xC4, 0x44, 0x0F, 0x8B })) return false;
+    DWORD old;
+    VirtualProtect((void*)a, 0x14, PAGE_EXECUTE_READWRITE, &old);
+    Mem<uint8_t>(a + 0x02) = 0x40;                          // test ah, 0x40 (equal, or a NaN)
+    Mem<uint8_t>(a + 0x03) = 0x74;                          // je: go round again only when really different
+    Mem<uint8_t>(a + 0x10) = 0x40;
+    Mem<uint8_t>(a + 0x12) = 0x85;                          // jne: leave when settled
+    VirtualProtect((void*)a, 0x14, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), (void*)a, 0x14);
+    return true;
+}
+
+unsigned ClockMs() { return g_addr.clockMs ? Mem<unsigned>(g_addr.clockMs) : 0; }
 
 void* GunMoveAddress() { return (void*)g_addr.gunMove; }
 

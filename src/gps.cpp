@@ -15,9 +15,10 @@
 // depends on the exe build, and searching on a worker thread keeps the game smooth.
 namespace {
 
-struct Node { float x, y, z; uint32_t firstLink; uint8_t linkCount; bool usable; };
+struct Node { float x, y, z; uint32_t firstLink; uint8_t linkCount; bool usable; float k; };   // k: cost per metre
 std::vector<Node> g_nodes;
 std::vector<uint32_t> g_links;
+std::vector<uint8_t> g_oneWayAgainst;           // parallel to g_links: this link runs against a one-way road
 std::vector<std::vector<uint32_t>> g_grid;      // 100 m cells over the 6 km map
 const int kGrid = 60;
 volatile LONG g_loaded = 0;
@@ -28,21 +29,22 @@ template <typename T> T Rd(const std::string& b, size_t o) { T v; memcpy(&v, b.d
 
 void LoadGraph()
 {
-    uint32_t base[64] = {}, count[64] = {};
+    uint32_t base[64] = {}, count[64] = {}, naviCount[64] = {};
     std::vector<std::string> files(64);
     uint32_t total = 0;
     for (int a = 0; a < 64; ++a) {
         files[a] = GameData::ImgRead("nodes" + std::to_string(a) + ".dat");
         base[a] = total;
-        if (files[a].size() >= 20) { count[a] = Rd<uint32_t>(files[a], 0); total += count[a]; }
+        if (files[a].size() >= 20) { count[a] = Rd<uint32_t>(files[a], 0); naviCount[a] = Rd<uint32_t>(files[a], 12); total += count[a]; }
     }
     g_nodes.resize(total);
     g_grid.assign(kGrid * kGrid, {});
     for (int a = 0; a < 64; ++a) {
         const std::string& f = files[a];
         if (f.size() < 20) continue;
-        uint32_t nodes = Rd<uint32_t>(f, 0), vehicle = Rd<uint32_t>(f, 4), navi = Rd<uint32_t>(f, 12);
+        uint32_t nodes = Rd<uint32_t>(f, 0), vehicle = Rd<uint32_t>(f, 4), navi = Rd<uint32_t>(f, 12), links = Rd<uint32_t>(f, 16);
         size_t linkTable = 20 + nodes * 28 + navi * 14;
+        size_t naviLinks = linkTable + links * 4 + 768;
         for (uint32_t i = 0; i < nodes; ++i) {
             size_t o = 20 + i * 28;
             uint16_t linkId = Rd<uint16_t>(f, o + 16);
@@ -53,12 +55,37 @@ void LoadGraph()
             n.z = Rd<int16_t>(f, o + 12) / 8.0f;
             n.linkCount = flags & 0x0F;
             n.firstLink = (uint32_t)g_links.size();
-            n.usable = i < vehicle && !(flags & 0x80) && !(flags & 0x100);   // roads only: no boats, no emergency lanes
+            n.usable = i < vehicle && !(flags & 0x80);                       // roads only, no boat paths
+            // Prefer the roads a driver would pick. Ramps and connectors AI traffic skips stay usable, just at a cost.
+            n.k = (flags & 0x2000) ? 0.75f : 1.0f;                           // highway
+            if (flags & 0x10) n.k = std::max(n.k, 1.5f);                     // dead-end road
+            if (((flags >> 20) & 15) == 2) n.k = 2.5f;                       // parking lot
+            if (flags & 0x100) n.k = std::max(n.k, 1.8f);                    // switched off for traffic
             for (int l = 0; l < n.linkCount; ++l) {
                 size_t lo = linkTable + (size_t)(linkId + l) * 4;
-                if (lo + 4 > f.size()) { g_links.push_back(0xFFFFFFFF); continue; }
+                if (lo + 4 > f.size()) { g_links.push_back(0xFFFFFFFF); g_oneWayAgainst.push_back(0); continue; }
                 uint16_t ta = Rd<uint16_t>(f, lo), tn = Rd<uint16_t>(f, lo + 2);
                 g_links.push_back(ta < 64 && tn < count[ta] ? base[ta] + tn : 0xFFFFFFFF);
+
+                // Lane counts live on the "navi" node half way along the road, counted from the node it's attached to.
+                uint8_t against = 0;
+                size_t no = naviLinks + (size_t)(linkId + l) * 2;
+                if (i < vehicle && no + 2 <= f.size()) {
+                    uint16_t v = Rd<uint16_t>(f, no);
+                    uint32_t nid = v & 1023, nar = v >> 10;
+                    if (nar < 64 && nid < naviCount[nar]) {
+                        const std::string& g = files[nar];
+                        size_t q = 20 + count[nar] * 28 + nid * 14;
+                        if (q + 14 <= g.size()) {
+                            bool fromAttached = Rd<uint16_t>(g, q + 4) == a && Rd<uint16_t>(g, q + 6) == i;
+                            uint32_t lf = Rd<uint32_t>(g, q + 10);
+                            uint32_t same = (lf >> 11) & 7, opposite = (lf >> 8) & 7;
+                            uint32_t forward = fromAttached ? same : opposite, back = fromAttached ? opposite : same;
+                            against = forward == 0 && back > 0;
+                        }
+                    }
+                }
+                g_oneWayAgainst.push_back(against);
             }
         }
     }
@@ -86,8 +113,22 @@ void LoadGraph()
     InterlockedExchange(&g_loaded, 1);
 }
 
+// How well the node's drivable links line up with a direction: 1 straight ahead, -1 behind.
+float Alignment(const Node& n, float hx, float hy)
+{
+    float best = -1.0f;
+    for (int l = 0; l < n.linkCount; ++l) {
+        uint32_t v = g_links[n.firstLink + l];
+        if (v == 0xFFFFFFFF || g_oneWayAgainst[n.firstLink + l] || !g_nodes[v].usable) continue;
+        float dx = g_nodes[v].x - n.x, dy = g_nodes[v].y - n.y, len = hypotf(dx, dy);
+        if (len > 0.1f) best = std::max(best, (dx * hx + dy * hy) / len);
+    }
+    return best;
+}
+
 // useZ picks the road on the right level, so a bridge overhead doesn't count as "closest".
-int Nearest(float x, float y, float z, bool useZ)
+// With a heading, the carriageway going your way beats the one a few metres across the barrier.
+int Nearest(float x, float y, float z, bool useZ, float hx = 0.0f, float hy = 0.0f)
 {
     int cx = Cell(x), cy = Cell(y), best = -1;
     float bestD = 1e12f;
@@ -99,6 +140,7 @@ int Nearest(float x, float y, float z, bool useZ)
                     const Node& n = g_nodes[id];
                     float dz = useZ ? (n.z - z) * 3.0f : 0.0f;
                     float d = (n.x - x) * (n.x - x) + (n.y - y) * (n.y - y) + dz * dz;
+                    if ((hx != 0.0f || hy != 0.0f) && Alignment(n, hx, hy) < 0.2f) d += 900.0f;
                     if (d < bestD) { bestD = d; best = (int)id; }
                 }
             }
@@ -109,40 +151,59 @@ int Nearest(float x, float y, float z, bool useZ)
 
 struct Pt { float x, y, z; };
 
-bool FindRoute(float sx, float sy, float sz, float dx, float dy, float dz, bool destHasZ, std::vector<Pt>& out)
+bool Search(int s, int d, float hx, float hy, bool obeyOneWay, std::vector<int>& prev)
 {
-    int s = Nearest(sx, sy, sz, true), d = Nearest(dx, dy, dz, destHasZ);
-    if (s < 0 || d < 0) return false;
     static std::vector<float> cost;
-    static std::vector<int> prev;
     static std::vector<uint32_t> stamp;
     static uint32_t run = 0;
-    if (cost.size() != g_nodes.size()) { cost.resize(g_nodes.size()); prev.resize(g_nodes.size()); stamp.assign(g_nodes.size(), 0); }
+    if (cost.size() != g_nodes.size()) { cost.resize(g_nodes.size()); stamp.assign(g_nodes.size(), 0); }
     ++run;
     using QE = std::pair<float, int>;
     std::priority_queue<QE, std::vector<QE>, std::greater<QE>> open;
     const Node& goal = g_nodes[d];
-    auto h = [&](const Node& n) { return hypotf(n.x - goal.x, n.y - goal.y); };
+    auto h = [&](const Node& n) { return hypotf(n.x - goal.x, n.y - goal.y) * 0.75f; };   // 0.75: the cheapest road per metre
     cost[s] = 0; prev[s] = -1; stamp[s] = run;
     open.push({ h(g_nodes[s]), s });
-    bool found = false;
     while (!open.empty()) {
         auto [f, u] = open.top(); open.pop();
-        if (u == d) { found = true; break; }
+        if (u == d) return true;
         const Node& n = g_nodes[u];
         if (f > cost[u] + h(n) + 0.01f) continue;
         for (int l = 0; l < n.linkCount; ++l) {
             uint32_t v = g_links[n.firstLink + l];
-            if (v == 0xFFFFFFFF || !g_nodes[v].usable) continue;
+            if (v == 0xFFFFFFFF || !g_nodes[v].usable || (obeyOneWay && g_oneWayAgainst[n.firstLink + l])) continue;
             const Node& m = g_nodes[v];
-            float c = cost[u] + sqrtf((m.x - n.x) * (m.x - n.x) + (m.y - n.y) * (m.y - n.y) + (m.z - n.z) * (m.z - n.z));
+            float len = sqrtf((m.x - n.x) * (m.x - n.x) + (m.y - n.y) * (m.y - n.y) + (m.z - n.z) * (m.z - n.z));
+            float c = cost[u] + len * m.k;
+
+            // Turning costs time: U-turns most, then sharp corners, then bending through a junction.
+            float bx = m.x - n.x, by = m.y - n.y, blen = hypotf(bx, by);
+            float ax = hx, ay = hy, alen = 1.0f;
+            bool hasDirection = hx != 0.0f || hy != 0.0f;
+            if (prev[u] >= 0) { const Node& p = g_nodes[prev[u]]; ax = n.x - p.x; ay = n.y - p.y; alen = hypotf(ax, ay); hasDirection = true; }
+            if (hasDirection && alen > 0.1f && blen > 0.1f) {
+                float dot = (ax * bx + ay * by) / (alen * blen);
+                if (dot < -0.5f) c += 200.0f;
+                else if (dot < 0.4f) c += 30.0f;
+                else if (dot < 0.85f && n.linkCount >= 3) c += 8.0f;
+            }
             if (stamp[v] != run || c < cost[v]) {
                 stamp[v] = run; cost[v] = c; prev[v] = u;
                 open.push({ c + h(m), (int)v });
             }
         }
     }
-    if (!found) return false;
+    return false;
+}
+
+bool FindRoute(float sx, float sy, float sz, float dx, float dy, float dz, bool destHasZ, float hx, float hy, std::vector<Pt>& out)
+{
+    int s = Nearest(sx, sy, sz, true, hx, hy), d = Nearest(dx, dy, dz, destHasZ);
+    if (s < 0 || d < 0) return false;
+    static std::vector<int> prev;
+    if (prev.size() != g_nodes.size()) prev.resize(g_nodes.size());
+    // A few spots can only be left against the one-way markings: a route that bends the rules beats none.
+    if (!Search(s, d, hx, hy, true, prev) && !Search(s, d, hx, hy, false, prev)) return false;
     std::vector<Pt> pts;
     pts.push_back({ dx, dy, destHasZ ? dz : g_nodes[d].z });
     for (int at = d; at >= 0; at = prev[at]) pts.push_back({ g_nodes[at].x, g_nodes[at].y, g_nodes[at].z });
@@ -153,28 +214,36 @@ bool FindRoute(float sx, float sy, float sz, float dx, float dy, float dz, bool 
 
 SRWLOCK g_lock = SRWLOCK_INIT;
 HANDLE  g_wake = nullptr;
-struct Req { float sx, sy, sz, dx, dy, dz; bool destHasZ; };
-Req  g_req;
-bool g_pending = false;
-std::vector<Pt> g_route;
-bool g_have = false;
+struct Req { float sx, sy, sz, dx, dy, dz; bool destHasZ; float hx, hy; };
+
+// One route per destination, so a waypoint and a mission objective can both be followed.
+struct Slot {
+    Req   req{};
+    bool  pending = false, have = false, active = false;
+    float lastDx = 1e9f, lastDy = 1e9f;
+    std::vector<Pt> route;
+};
+enum { kWaypoint, kMission, kSlots };
+Slot g_slots[kSlots];
 
 DWORD WINAPI Worker(LPVOID)
 {
     LoadGraph();
     for (;;) {
         WaitForSingleObject(g_wake, INFINITE);
-        AcquireSRWLockExclusive(&g_lock);
-        Req r = g_req;
-        bool go = g_pending;
-        g_pending = false;
-        ReleaseSRWLockExclusive(&g_lock);
-        if (!go) continue;
-        std::vector<Pt> pts;
-        bool ok = FindRoute(r.sx, r.sy, r.sz, r.dx, r.dy, r.dz, r.destHasZ, pts);
-        AcquireSRWLockExclusive(&g_lock);
-        if (ok) { g_route.swap(pts); g_have = true; } else { g_route.clear(); g_have = false; }
-        ReleaseSRWLockExclusive(&g_lock);
+        for (Slot& slot : g_slots) {
+            AcquireSRWLockExclusive(&g_lock);
+            Req r = slot.req;
+            bool go = slot.pending;
+            slot.pending = false;
+            ReleaseSRWLockExclusive(&g_lock);
+            if (!go) continue;
+            std::vector<Pt> pts;
+            bool ok = FindRoute(r.sx, r.sy, r.sz, r.dx, r.dy, r.dz, r.destHasZ, r.hx, r.hy, pts);
+            AcquireSRWLockExclusive(&g_lock);
+            if (ok) { slot.route.swap(pts); slot.have = true; } else { slot.route.clear(); slot.have = false; }
+            ReleaseSRWLockExclusive(&g_lock);
+        }
     }
 }
 
@@ -210,17 +279,6 @@ bool ObjectivePos(CVector& out)
     return found;
 }
 
-bool g_toMission = false;
-
-bool Destination(CVector& out)
-{
-    g_toMission = false;
-    if (Game::WaypointPosition(out)) return true;
-    if (!g_toggles.gps.toObjective || !Game::OnMission() || !ObjectivePos(out)) return false;
-    g_toMission = true;
-    return true;
-}
-
 bool g_active = false;
 const char* g_status = "Off";
 
@@ -229,11 +287,11 @@ void SetStatus(const char* s)
     if (s != g_status) { g_status = s; Log("GPS status: %s", s); }
 }
 
-float DistToRoute(const CVector& me)
+float DistToRoute(const Slot& slot, const CVector& me)
 {
     float best = 1e9f;
     AcquireSRWLockShared(&g_lock);
-    for (const Pt& p : g_route) best = std::min(best, hypotf(hypotf(p.x - me.x, p.y - me.y), (p.z - me.z) * 2.0f));
+    for (const Pt& p : slot.route) best = std::min(best, hypotf(hypotf(p.x - me.x, p.y - me.y), (p.z - me.z) * 2.0f));
     ReleaseSRWLockShared(&g_lock);
     return best;
 }
@@ -261,7 +319,14 @@ namespace GPS {
 
 bool Objective(CVector& out) { return ObjectivePos(out); }
 int NodeCount() { return g_loaded ? (int)g_nodes.size() : 0; }
-int RoutePoints() { AcquireSRWLockShared(&g_lock); int n = (int)g_route.size(); ReleaseSRWLockShared(&g_lock); return n; }
+int RoutePoints()
+{
+    AcquireSRWLockShared(&g_lock);
+    int n = 0;
+    for (const Slot& slot : g_slots) n += (int)slot.route.size();
+    ReleaseSRWLockShared(&g_lock);
+    return n;
+}
 
 const char* Status() { return g_status; }
 
@@ -275,40 +340,55 @@ void Tick()
     if (!g_toggles.gps.onFoot && !Game::PlayerVehicle()) { SetStatus("Get in a vehicle"); return; }
 
     static DWORD last = 0;
-    if (GetTickCount() - last < 500) { g_active = g_have; return; }
-    last = GetTickCount();
-
-    CVector dest;
-    if (!Destination(dest)) {
-        AcquireSRWLockExclusive(&g_lock); g_route.clear(); g_have = false; ReleaseSRWLockExclusive(&g_lock);
-        SetStatus("No marker on the map");
+    if (GetTickCount() - last < 500) {
+        for (const Slot& slot : g_slots) g_active |= slot.active && slot.have;
         return;
     }
-    g_active = true;
+    last = GetTickCount();
+
+    CVector dest[kSlots];
+    bool want[kSlots];
+    want[kWaypoint] = Game::WaypointPosition(dest[kWaypoint]);
+    want[kMission]  = g_toggles.gps.toObjective && Game::OnMission() && ObjectivePos(dest[kMission]);
+
     CVector me = Game::PlayerPosition();
-    static float lastDx = 1e9f, lastDy = 1e9f;
-    bool moved = hypotf(dest.x - lastDx, dest.y - lastDy) > 8.0f;
-    bool lost = !g_have || DistToRoute(me) > 45.0f;
-    SetStatus(g_have ? "Route shown" : "Finding a route");
-    if (moved || lost) {
-        lastDx = dest.x; lastDy = dest.y;
-        AcquireSRWLockExclusive(&g_lock);
-        g_req = { me.x, me.y, me.z, dest.x, dest.y, dest.z, g_toMission && dest.z > -50.0f && fabsf(dest.z) > 0.01f };
-        g_pending = true;
-        ReleaseSRWLockExclusive(&g_lock);
-        SetEvent(g_wake);
+    float hx = 0.0f, hy = 0.0f;
+    if (void* car = Game::PlayerVehicle()) {                // so a route starts the way the car is pointing
+        CVector f = Game::EntityForward(car);
+        float len = hypotf(f.x, f.y);
+        if (len > 0.1f) { hx = f.x / len; hy = f.y / len; }
     }
+
+    bool any = false, shown = false, ask = false;
+    for (int i = 0; i < kSlots; ++i) {
+        Slot& slot = g_slots[i];
+        slot.active = want[i];
+        if (!want[i]) {
+            AcquireSRWLockExclusive(&g_lock); slot.route.clear(); slot.have = false; ReleaseSRWLockExclusive(&g_lock);
+            continue;
+        }
+        any = true;
+        shown |= slot.have;
+        const CVector& d = dest[i];
+        bool moved = hypotf(d.x - slot.lastDx, d.y - slot.lastDy) > 8.0f;
+        bool lost = !slot.have || DistToRoute(slot, me) > 45.0f;
+        if (moved || lost) {
+            slot.lastDx = d.x; slot.lastDy = d.y;
+            AcquireSRWLockExclusive(&g_lock);
+            slot.req = { me.x, me.y, me.z, d.x, d.y, d.z, i == kMission && d.z > -50.0f && fabsf(d.z) > 0.01f, hx, hy };
+            slot.pending = true;
+            ReleaseSRWLockExclusive(&g_lock);
+            ask = true;
+        }
+    }
+    if (ask) SetEvent(g_wake);
+    g_active = any;
+    SetStatus(!any ? "No marker on the map" : shown ? "Route shown" : "Finding a route");
 }
 
-void Render()
+static void DrawRoute(const std::vector<Pt>& route, const float* c)
 {
-    if (!g_active || !Game::InGame() || Game::PauseMenuOpen() || Game::WidescreenOn() || !Game::HasRadar()) return;
-    std::vector<Pt> route;
-    AcquireSRWLockShared(&g_lock);
-    route = g_route;
-    ReleaseSRWLockShared(&g_lock);
     if (route.size() < 2) return;
-
     CVector me = Game::PlayerPosition();
     size_t start = 0;
     float best = 1e9f;
@@ -318,7 +398,6 @@ void Render()
     }
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     float scale = ImGui::GetFontSize() / 17.0f;
-    const float* c = g_toMission ? g_toggles.gps.colMission : g_toggles.gps.colWaypoint;
     ImU32 col = ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], c[3]));
     float rx0, ry0;
     Game::WorldToRadar(me.x, me.y, rx0, ry0);
@@ -333,6 +412,19 @@ void Render()
             dl->AddLine(ImVec2(s0x, s0y), ImVec2(s1x, s1y), col, g_toggles.gps.width * scale);
         }
         rx0 = rx1; ry0 = ry1;
+    }
+}
+
+void Render()
+{
+    if (!g_active || !Game::InGame() || Game::PauseMenuOpen() || Game::WidescreenOn() || !Game::HasRadar()) return;
+    for (int i = 0; i < kSlots; ++i) {                      // the mission route is drawn last, on top where they overlap
+        if (!g_slots[i].active) continue;
+        std::vector<Pt> route;
+        AcquireSRWLockShared(&g_lock);
+        route = g_slots[i].route;
+        ReleaseSRWLockShared(&g_lock);
+        DrawRoute(route, i == kMission ? g_toggles.gps.colMission : g_toggles.gps.colWaypoint);
     }
 }
 

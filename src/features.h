@@ -55,7 +55,7 @@ struct GameplayCfg {
     bool  anyVehicleWeapon = false;
     float driveBySens = 1.0f;    // on top of the game's own mouse sensitivity
     bool  neverBusted = false, noFallOffBike = false, unlimitedStamina = false, infiniteBreath = false;
-    bool  fastReload = false, slowmoAiming = false;
+    bool  fastReload = false, slowmoAiming = false, alwaysFed = false;
     bool  noSpread = false, moveWhileAiming = false, armedSprint = false;
     float slowmoScale = 0.4f;
 };

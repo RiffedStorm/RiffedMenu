@@ -134,6 +134,7 @@ static void Gameplay(void* ped, void* veh, float dt)
     static bool driveByApplied = false;
     if (driveByApplied != p.freeDriveBy) { driveByApplied = p.freeDriveBy; Game::SetFreeDriveBy(driveByApplied); }
     if (p.infiniteBreath) Game::RefillBreath();
+    if (p.alwaysFed) Game::ClearHunger();
     static bool moveAimApplied = false;
     bool wantMoveAim = p.moveWhileAiming && !g_multiplayer;
     if (moveAimApplied != wantMoveAim) { moveAimApplied = wantMoveAim; Game::SetMoveWhileAiming(wantMoveAim); }

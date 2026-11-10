@@ -59,6 +59,7 @@ static bool    g_imguiReady = false;
 static IDirect3DDevice9* g_device = nullptr;
 
 static volatile LONG g_cntPresent = 0, g_cntEndScene = 0, g_cntFrames = 0, g_cntReset = 0;
+static volatile DWORD g_gameThread = 0;
 static volatile DWORD g_lastPresentTick = 0;   // last time any Present-type hook ran
 static bool g_inOverlay = false;               // our own BeginScene/EndScene must not recurse
 
@@ -250,6 +251,7 @@ static HRESULT WINAPI hkPresent(IDirect3DDevice9* dev, const RECT* s, const RECT
 {
     auto o = (Present_t)Orig(dev, 17);
     InterlockedIncrement(&g_cntPresent);
+    g_gameThread = GetCurrentThreadId();
     g_lastPresentTick = GetTickCount();
     DrawFrame(dev, false, "IDirect3DDevice9::Present");
     return o(dev, s, d, w, r);
@@ -325,6 +327,62 @@ static bool HookDevice(IDirect3DDevice9* dev, const char* source)
 
 // Re-hooks if the game creates a new device / switches vtables, reports slots that someone
 // else replaced, and logs which render path is live (makes "menu doesn't show" diagnosable).
+// Writes down where the game thread is stuck when frames stop, because a freeze leaves no crash report.
+
+static DWORD WINAPI FreezeReporter(LPVOID)
+{
+    LONG last = -1;
+    int still = 0, reports = 0;
+    for (;;) {
+        Sleep(1000);
+        LONG now = g_cntPresent;
+        if (now != last) { last = now; still = 0; continue; }
+        if (++still != 6 || reports >= 5 || !g_gameThread) continue;
+        ++reports;
+        HANDLE t = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, g_gameThread);
+        if (!t) continue;
+        // Many short looks: a real hang sits in one place, a game that merely stopped drawing moves around.
+        // Only copy while it's suspended, because logging could wait on a lock the stuck thread holds.
+        constexpr int kSamples = 30, kFrames = 32;
+        DWORD eips[kSamples] = {}, chain[kFrames] = {};
+        int taken = 0, depth = 0;
+        unsigned clockStart = Game::ClockMs();
+        for (int n = 0; n < kSamples; ++n) {
+            if (SuspendThread(t) == (DWORD)-1) break;
+            CONTEXT c{};
+            c.ContextFlags = CONTEXT_CONTROL;
+            if (GetThreadContext(t, &c)) {
+                eips[taken++] = c.Eip;
+                if (n == 0) {
+                    DWORD ebp = c.Ebp;
+                    while (depth < kFrames) {
+                        DWORD frame[2];
+                        SIZE_T got = 0;
+                        if (!ReadProcessMemory(GetCurrentProcess(), (void*)ebp, frame, sizeof(frame), &got) || got != sizeof(frame)) break;
+                        if (!frame[1]) break;
+                        chain[depth++] = frame[1];
+                        if (frame[0] <= ebp) break;
+                        ebp = frame[0];
+                    }
+                }
+            }
+            ResumeThread(t);
+            Sleep(100);
+        }
+        CloseHandle(t);
+        unsigned clockEnd = Game::ClockMs();
+        Log("Freeze: no new frame for 6 s; game clock moved %u ms during %d samples", clockEnd - clockStart, taken);
+        std::sort(eips, eips + taken);
+        for (int i = 0; i < taken;) {
+            int j = i;
+            while (j < taken && eips[j] == eips[i]) ++j;
+            Log("Freeze:   %2dx at %s", j - i, ModuleOf((void*)eips[i]).c_str());
+            i = j;
+        }
+        for (int i = 0; i < depth; ++i) Log("Freeze:   called from %s", ModuleOf((void*)chain[i]).c_str());
+    }
+}
+
 static DWORD WINAPI Watchdog(LPVOID)
 {
     LONG lastFrames = -1;
@@ -368,6 +426,7 @@ bool Hooks::InstallRenderHooks()
         }
         if (!ok) Log("Game never created a D3D9 device?");
         if (HANDLE t = CreateThread(nullptr, 0, Watchdog, nullptr, 0, nullptr)) CloseHandle(t);
+        if (HANDLE t = CreateThread(nullptr, 0, FreezeReporter, nullptr, 0, nullptr)) CloseHandle(t);
         return ok;
     }
 

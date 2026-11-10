@@ -115,6 +115,7 @@ void*   PedLastDamager(void* ped);
 void*   PedCar(void* ped);
 CVector EntityPos(void* entity);
 CVector EntitySpeed(void* entity);
+CVector EntityForward(void* entity);
 bool    PedBone(void* ped, int bone, CVector& out);   // 8 head, 3 chest, 2 pelvis
 void    GetBlips(std::vector<Blip>& out);
 
@@ -156,6 +157,7 @@ void    SetNeverTired(bool on);
 void    SetFastReload(bool on);
 void    SetStayOnBike(bool on);
 void    RefillBreath();
+void    ClearHunger();
 bool    CanFreeDriveBy();
 void    SetFreeDriveBy(bool on);
 bool    IsDriver(void* veh);
@@ -178,6 +180,11 @@ void    SteadyAim(void* ped);
 float*  WeaponAccuracy(void* ped, int weapon);
 bool    OnCrosshairLine(const CVector& from, CVector& out);
 void    SetMoveWhileAiming(bool on);
+unsigned ClockMs();                        // the game's running clock
+void*   WeaveAngleAddress();
+void*   LineClearAddress();
+void*   LineHitAddress();
+bool    FixWeaveLoop();
 void*   GunMoveAddress();
 void    StartGunMove(void* task, const float* wanted);
 void*&  PedWeaponObject(void* ped);

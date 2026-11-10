@@ -216,7 +216,7 @@ void RunAimbot()
     }
 
     float db, da;
-    if (!AimError(p, db, da)) return;
+    if (!AimError(p, db, da) || !std::isfinite(db) || !std::isfinite(da)) return;
     float k = 1.0f - std::clamp(a.smooth, 0.0f, 0.97f);
     float& beta = Game::CameraBeta();
     float& alpha = Game::CameraAlpha();
@@ -294,6 +294,71 @@ void __fastcall hkAnimGroups(void* ped, void* edx)
     oAnimGroups(ped, edx);
 }
 
+// The game's line checks walk the map one sector at a time. An invalid or absurd point makes that walk
+// run for billions of steps, which looks like a freeze, so those calls are refused and written down.
+bool BadPoint(const CVector* p)
+{
+    if (!p) return true;
+    return !std::isfinite(p->x) || !std::isfinite(p->y) || !std::isfinite(p->z) ||
+           fabsf(p->x) > 200000.0f || fabsf(p->y) > 200000.0f;
+}
+
+void ReportBadLine(void* caller, const CVector* a, const CVector* b)
+{
+    static int reports = 0;
+    if (reports >= 8 || !a || !b) return;
+    ++reports;
+    Log("Line check refused, called from %p: from %f %f %f to %f %f %f", caller, a->x, a->y, a->z, b->x, b->y, b->z);
+}
+
+using LineClear_t = char(__cdecl*)(CVector*, CVector*, int, int, int, int, int, int, int);
+LineClear_t oLineClear = nullptr;
+
+char __cdecl hkLineClear(CVector* a, CVector* b, int f1, int f2, int f3, int f4, int f5, int f6, int f7)
+{
+    if (BadPoint(a) || BadPoint(b)) { ReportBadLine(__builtin_return_address(0), a, b); return 0; }
+    return oLineClear(a, b, f1, f2, f3, f4, f5, f6, f7);
+}
+
+using LineHit_t = char(__cdecl*)(CVector*, CVector*, void*, void*, int, int, int, int, int, int, int, int);
+LineHit_t oLineHit = nullptr;
+
+char __cdecl hkLineHit(CVector* a, CVector* b, void* point, void* entity, int f1, int f2, int f3, int f4, int f5, int f6, int f7, int f8)
+{
+    if (BadPoint(a) || BadPoint(b)) { ReportBadLine(__builtin_return_address(0), a, b); return 0; }
+    return oLineHit(a, b, point, entity, f1, f2, f3, f4, f5, f6, f7, f8);
+}
+
+// Keeps invalid numbers out of the traffic steering, and notes where they came from.
+using Weave_t = float(__cdecl*)(void*, void*, float, float, float);
+Weave_t oWeave = nullptr;
+
+void ReportBadWeave(const char* what, void* car, float a, float b, float c, float r)
+{
+    static int reports = 0;
+    if (reports >= 8) return;
+    ++reports;
+    CVector p = Game::EntityPos(car), v = Game::EntitySpeed(car);
+    Log("Traffic: bad %s, model %d pos %f %f %f speed %f %f %f, angles %f %f distance %f result %f",
+        what, *(short*)((uint8_t*)car + 0x22), p.x, p.y, p.z, v.x, v.y, v.z, a, b, c, r);
+}
+
+float __cdecl hkWeave(void* car, void* other, float a, float b, float c)
+{
+    if (!std::isfinite(a) || !std::isfinite(b) || !std::isfinite(c)) {
+        ReportBadWeave("input", car, a, b, c, 0.0f);
+        if (!std::isfinite(a)) a = std::isfinite(b) ? b : 0.0f;
+        if (!std::isfinite(b)) b = a;
+        if (!std::isfinite(c)) c = 1.0f;
+    }
+    float result = oWeave(car, other, a, b, c);
+    if (!std::isfinite(result)) {
+        ReportBadWeave("result", car, a, b, c, result);
+        result = a;
+    }
+    return result;
+}
+
 using GunMove_t = char(__fastcall*)(void*, void*, float*);
 GunMove_t oGunMove = nullptr;
 
@@ -342,6 +407,19 @@ bool InstallBulletHook()
         if (MH_CreateHook(g, (void*)hkAnimGroups, (void**)&oAnimGroups) == MH_OK && MH_EnableHook(g) == MH_OK)
             Log("Hooked CPlayerPed::ProcessAnimGroups at %p", g);
         else Log("Movement set hook failed");
+    }
+    void* lc = Game::LineClearAddress();
+    void* lh = Game::LineHitAddress();
+    if (lc && lh) {
+        bool ok = MH_CreateHook(lc, (void*)hkLineClear, (void**)&oLineClear) == MH_OK && MH_EnableHook(lc) == MH_OK;
+        ok = MH_CreateHook(lh, (void*)hkLineHit, (void**)&oLineHit) == MH_OK && MH_EnableHook(lh) == MH_OK && ok;
+        Log(ok ? "Line check guard installed" : "Line check guard failed");
+    }
+    if (void* w = Game::WeaveAngleAddress()) {
+        bool fixed = Game::FixWeaveLoop();
+        if (fixed && MH_CreateHook(w, (void*)hkWeave, (void**)&oWeave) == MH_OK && MH_EnableHook(w) == MH_OK)
+            Log("Traffic steering guard installed at %p", w);
+        else Log("Traffic steering guard failed (loop patch %d)", (int)fixed);
     }
     if (void* m = Game::GunMoveAddress()) {
         if (MH_CreateHook(m, (void*)hkGunMove, (void**)&oGunMove) == MH_OK && MH_EnableHook(m) == MH_OK)

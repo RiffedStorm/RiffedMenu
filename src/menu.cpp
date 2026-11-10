@@ -267,6 +267,10 @@ static void TabPlayer()
             Notify(T("Added $%d"), a);
         }
     }
+    if (ImGui::Button(T("Set to maximum"), ImVec2(-1, 0))) {
+        Features::Queue([] { Game::Money() = 999999999; });        // the game's own cap
+        Notify(T("Money set to $%d"), 999999999);
+    }
 }
 
 static void SpawnFromMenu(const VehicleEntry& v)
@@ -848,6 +852,7 @@ static void TabGameplay()
         ImGui::TableNextColumn(); Toggle(T("Stay on bikes"), &p.noFallOffBike, T("CJ doesn't fall off bikes and motorbikes."));
         ImGui::TableNextColumn(); Toggle(T("Unlimited stamina"), &p.unlimitedStamina);
         ImGui::TableNextColumn(); Toggle(T("Unlimited breath"), &p.infiniteBreath);
+        ImGui::TableNextColumn(); Toggle(T("Always fed"), &p.alwaysFed, T("CJ never gets hungry, so he doesn't lose fat, muscle or health from not eating."));
         ImGui::TableNextColumn(); Toggle(T("Fast reload"), &p.fastReload);
         ImGui::TableNextColumn(); Toggle(T("Slow motion while aiming"), &p.slowmoAiming);
         ImGui::BeginDisabled(!Game::FireInstantHitAddress());
