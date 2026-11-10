@@ -58,6 +58,7 @@ void     SetVehicleProofs(bool on);
 void     RepairVehicle();
 void     AutoRepair(void* veh);                 // call every frame: fixes health loss and visible damage
 void     FlipVehicle();
+bool     VehicleStuckUpsideDown(void* veh);
 void     BoostVehicle(float factor);
 void     SpawnVehicle(int modelId, bool warpInside, const char* plate);   // no-op indoors; doors unlocked
 

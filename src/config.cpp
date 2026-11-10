@@ -26,7 +26,7 @@ std::vector<Entry>& Table()
 
     B("godMode", g.godMode); B("infiniteArmour", g.infiniteArmour); B("infiniteAmmo", g.infiniteAmmo);
     B("neverWanted", g.neverWanted); B("noclip", g.noclip); F("noclipSpeed", g.noclipSpeed);
-    B("vehicleGod", g.vehicleGod); B("autoRepair", g.autoRepair); B("freezeTime", g.freezeTime);
+    B("vehicleGod", g.vehicleGod); B("autoRepair", g.autoRepair); B("autoFlip", g.autoFlip); B("freezeTime", g.freezeTime);
     I("frozenHour", g.frozenHour); I("frozenMinute", g.frozenMinute); B("lockWeather", g.lockWeather);
     I("weather", g.weather); B("spawnInside", g.spawnInside); t.push_back({ "plate", K::Str, g.plate, sizeof(g.plate) });
     F("damageMult", g.damageMult); F("gameSpeed", g.gameSpeed); F("gravity", g.gravity); I("ammoMul", g.ammoMul);

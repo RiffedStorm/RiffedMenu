@@ -363,6 +363,8 @@ const Pair kPolish[] = {
     { "Always fed", "Zawsze najedzony" },
     { "CJ never gets hungry, so he doesn't lose fat, muscle or health from not eating.", "CJ nigdy nie jest głodny, więc nie traci tłuszczu, mięśni ani zdrowia z powodu braku jedzenia." },
     { "Set to maximum", "Ustaw maksimum" },
+    { "Auto flip", "Automatyczne odwracanie" },
+    { "Turns your car back onto its wheels when it ends up on its roof.", "Stawia auto z powrotem na koła, gdy wyląduje na dachu." },
     { "No bullet spread", "Brak rozrzutu pocisków" },
     { "Every shot goes exactly where the crosshair points, shotguns included.", "Każdy strzał trafia dokładnie w środek celownika, także ze strzelby." },
     { "Move while aiming", "Ruch podczas celowania" },

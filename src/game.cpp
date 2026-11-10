@@ -436,6 +436,16 @@ void FlipVehicle()
     Op(0x0175, { I(car), F(heading) });                      // SET_CAR_HEADING (rebuilds an upright matrix)
 }
 
+// On its roof and nearly stopped. Bikes, aircraft and boats are left alone, since a plane can fly inverted.
+bool VehicleStuckUpsideDown(void* veh)
+{
+    if (At<int>(veh, 0x594) > 2) return false;              // 0 car, 1 monster truck, 2 quad
+    void* m = At<void*>(veh, 0x14);
+    if (!m || At<float>(m, 0x28) > -0.15f) return false;    // z of the car's up direction
+    CVector v = EntitySpeed(veh);
+    return v.x * v.x + v.y * v.y + v.z * v.z < 0.05f * 0.05f;
+}
+
 void BoostVehicle(float factor)
 {
     int car = PlayerCar();

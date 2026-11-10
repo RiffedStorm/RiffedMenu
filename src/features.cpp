@@ -241,6 +241,15 @@ static void Gameplay(void* ped, void* veh, float dt)
     }
     if (driveBy && Game::CameraMode() == 55) Game::TurnDriveByCamera(mouseX, mouseY, p.driveBySens);
 
+    // Auto flip: a short wait so a car rolling over and landing back on its wheels isn't touched.
+    static float upsideDown = 0.0f;
+    if (g_toggles.autoFlip && veh && Game::IsDriver(veh) && Game::VehicleStuckUpsideDown(veh)) {
+        upsideDown += dt;
+        if (upsideDown >= 0.6f) { upsideDown = 0.0f; Game::FlipVehicle(); }
+    } else {
+        upsideDown = 0.0f;
+    }
+
     // Nitrous
     static void* nitroCar = nullptr;
     const NitroCfg& n = g_toggles.nitro;

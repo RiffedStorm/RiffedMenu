@@ -50,7 +50,7 @@ struct GameplayCfg {
     bool  lifesteal = false;     float healthPerKill = 25.0f, armourPerKill = 0.0f;
     int   moneyPerKill = 0;
     int   damageTaken = 100;     // percent
-    bool  explodingBullets = false; int explosionType = 0;
+    bool  explodingBullets = false; int explosionType = 2;   // 2 rocket: grenades leave cars burning before they blow
     bool  freeDriveBy = false;
     bool  anyVehicleWeapon = false;
     float driveBySens = 1.0f;    // on top of the game's own mouse sensitivity
@@ -82,6 +82,7 @@ struct Toggles {
     float noclipSpeed   = 20.0f;   // m/s, Shift = x4
     bool vehicleGod     = false;
     bool autoRepair     = false;
+    bool autoFlip       = false;
     bool freezeTime     = false;
     int  frozenHour     = 12;
     int  frozenMinute   = 0;

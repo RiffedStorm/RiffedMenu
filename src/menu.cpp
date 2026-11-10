@@ -299,6 +299,7 @@ static void TabVehicle()
     if (ImGui::BeginTable("##vtoggles", 2)) {
         ImGui::TableNextColumn(); Toggle(T("Vehicle god mode"), &g_toggles.vehicleGod, T("Proofs + health lock on the vehicle you're in"));
         ImGui::TableNextColumn(); Toggle(T("Auto repair"), &g_toggles.autoRepair, T("Fixes visual damage as soon as it happens"));
+        ImGui::TableNextColumn(); Toggle(T("Auto flip"), &g_toggles.autoFlip, T("Turns your car back onto its wheels when it ends up on its roof."));
         ImGui::EndTable();
     }
     SectionTitle(T("Nitrous"));
