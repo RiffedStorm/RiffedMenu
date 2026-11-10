@@ -42,7 +42,7 @@ On any other version the menu still opens, but shows a red warning and changes n
 
 ## Install
 
-1. Install an ASI loader, if you don't have one yet. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) is a common choice; [SilentPatch](https://silent.gtagames.nl/) users usually already have one.
+1. Install an ASI loader, if you don't have one yet. [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases) is a common choice; [SilentPatch](https://github.com/CookiePLMonster/SilentPatch) users usually already have one.
 2. Download `RiffedMenu.asi` from [Releases](../../releases/latest).
 3. Put it in the game folder, next to the game's `.exe`.
 4. Start the game, load a save, and press **Insert**.
