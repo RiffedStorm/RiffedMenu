@@ -8,6 +8,8 @@
 #include "config.h"
 #include "update.h"
 #include "wheel.h"
+#include "theme.h"
+#include "blur.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <dinput.h>
@@ -17,6 +19,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <map>
 #include <vector>
 #include "imgui.h"
 #include "imgui_impl_dx9.h"
@@ -111,22 +114,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return CallWindowProcW(g_origWndProc, hwnd, msg, wp, lp);
 }
 
-// Roboto (Apache 2.0, shipped with Dear ImGui) is built into the .asi: Polish letters then work on
-// every PC, with no font files to install.
-__asm__(".section .rdata,\"dr\"\n_riffed_font_start:\n.incbin \"Roboto-Medium.ttf\"\n_riffed_font_end:\n.text\n");
-extern "C" const unsigned char riffed_font_start[] __asm__("_riffed_font_start");
-extern "C" const unsigned char riffed_font_end[] __asm__("_riffed_font_end");
-
-static void LoadFonts(float px)
-{
-    ImGuiIO& io = ImGui::GetIO();
-    static const ImWchar ranges[] = { 0x0020, 0x00FF, 0x0100, 0x017F, 0x2010, 0x2026, 0 };
-    ImFontConfig cfg;
-    cfg.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF((void*)riffed_font_start, (int)(riffed_font_end - riffed_font_start), px, &cfg, ranges);
-    Log("Font: built-in Roboto @ %.0fpx", px);
-}
-
 static void InitImGui(IDirect3DDevice9* dev)
 {
     D3DDEVICE_CREATION_PARAMETERS cp{};
@@ -138,8 +125,7 @@ static void InitImGui(IDirect3DDevice9* dev)
         if (SUCCEEDED(dev->GetSwapChain(0, &sc))) { sc->GetPresentParameters(&pp); sc->Release(); g_hwnd = pp.hDeviceWindow; }
     }
     RECT rc{}; GetClientRect(g_hwnd, &rc);
-    float scale = std::max(1.0f, (rc.bottom - rc.top) / 1080.0f);
-    Log("Game window %p, %ldx%ld, UI scale %.2f", g_hwnd, rc.right - rc.left, rc.bottom - rc.top, scale);
+    Log("Game window %p, %ldx%ld", g_hwnd, rc.right - rc.left, rc.bottom - rc.top);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -147,10 +133,9 @@ static void InitImGui(IDirect3DDevice9* dev)
     static std::string ini = GameDir() + "RiffedMenu-imgui.ini";
     io.IniFilename = ini.c_str();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    LoadFonts(17.0f * scale);
-    Menu::ApplyStyle(scale);
     Features::RiskLoad();
-    Config::Init();
+    Config::Init();                       // before the fonts: the text size setting decides their size
+    Theme::BuildFonts((float)(rc.bottom - rc.top));
     Update::Start();
     g_multiplayer = GetModuleHandleA("samp.dll") != nullptr || GetModuleHandleA("netc.dll") != nullptr;
     if (g_multiplayer) Log("Multiplayer client detected: combat features are disabled");
@@ -171,7 +156,7 @@ static void PollToggleKey()
     bool down = (GetAsyncKeyState(g_toggles.menuKey) & 0x8000) != 0;
     if (down && !wasDown && GetForegroundWindow() == g_hwnd) {
         Menu::Toggle();
-        ImGui::GetIO().MouseDrawCursor = Menu::IsOpen();
+        ImGui::GetIO().MouseDrawCursor = false;   // the menu draws its own cursor
         if (Menu::IsOpen()) ClipCursor(nullptr);
         else Config::AutoSave();
     }
@@ -191,11 +176,18 @@ static void DrawFrame(IDirect3DDevice9* dev, bool insideScene, const char* via)
         g_gameFocused = GetForegroundWindow() == g_hwnd && !Captured();
         if (Game::Supported()) Features::Tick();
         PollToggleKey();
+        RECT rc{};
+        if (GetClientRect(g_hwnd, &rc) && rc.bottom > rc.top && Theme::FontsOutdated((float)(rc.bottom - rc.top))) {
+            ImGui_ImplDX9_InvalidateDeviceObjects();          // NewFrame uploads the rebuilt atlas
+            Theme::BuildFonts((float)(rc.bottom - rc.top));
+        }
         ImGui_ImplDX9_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         Menu::Render(dev);
         ImGui::EndFrame();
+        if (!insideScene) Blur::Capture(dev);   // the frosted backdrop needs this frame's game image
+        else Blur::Capture(nullptr);
         if (insideScene) {
             ImGui::Render();
             ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
@@ -301,6 +293,7 @@ static HRESULT WINAPI hkReset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp)
     auto o = (Reset_t)Orig(dev, 16);
     InterlockedIncrement(&g_cntReset);
     if (g_imguiReady) ImGui_ImplDX9_InvalidateDeviceObjects();
+    Blur::Release();
     HRESULT hr = o(dev, pp);
     static LONG failures = 0;
     if (SUCCEEDED(hr) || InterlockedIncrement(&failures) <= 5)   // a lost device retries every frame
@@ -480,6 +473,34 @@ void Hooks::TakeMouseDelta(int& dx, int& dy)
     g_mouseX = g_mouseY = 0;
 }
 
+// While the menu has the input, a gamepad must read as untouched: sticks centred, nothing pressed.
+// Zero is not centre for a stick (its range is often 0..65535), so blanking it made CJ walk and
+// the car camera tilt as if the stick was held. Each axis's centre comes from its own range.
+static void NeutralJoystick(void* self, DWORD size, void* data)
+{
+    static std::map<std::pair<void*, DWORD>, LONG> centres;
+    auto centreOf = [&](DWORD offset) {
+        auto key = std::make_pair(self, offset);
+        auto it = centres.find(key);
+        if (it != centres.end()) return it->second;
+        DIPROPRANGE r{};
+        r.diph.dwSize = sizeof(r);
+        r.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+        r.diph.dwObj = offset;
+        r.diph.dwHow = DIPH_BYOFFSET;
+        LONG c = 32767;                                        // DirectInput's default range is 0..65535
+        if (SUCCEEDED(((IDirectInputDevice8W*)self)->GetProperty(DIPROP_RANGE, &r.diph))) c = (r.lMin + r.lMax) / 2;
+        centres[key] = c;
+        return c;
+    };
+    memset(data, 0, size);                                     // buttons up, extended DIJOYSTATE2 fields zero
+    auto* js = (DIJOYSTATE*)data;
+    const DWORD axes[] = { DIJOFS_X, DIJOFS_Y, DIJOFS_Z, DIJOFS_RX, DIJOFS_RY, DIJOFS_RZ, DIJOFS_SLIDER(0), DIJOFS_SLIDER(1) };
+    LONG* fields[] = { &js->lX, &js->lY, &js->lZ, &js->lRx, &js->lRy, &js->lRz, &js->rglSlider[0], &js->rglSlider[1] };
+    for (int i = 0; i < 8; ++i) *fields[i] = centreOf(axes[i]);
+    for (DWORD& pov : js->rgdwPOV) pov = 0xFFFFFFFF;           // hat centred
+}
+
 // Up to 4 distinct implementations (A/W x keyboard/mouse), each needs its own trampoline.
 template <int N> struct DIHook {
     static inline GetDeviceState_t oState = nullptr;
@@ -491,7 +512,10 @@ template <int N> struct DIHook {
             g_mouseX += ((DIMOUSESTATE*)data)->lX;
             g_mouseY += ((DIMOUSESTATE*)data)->lY;
         }
-        if (SUCCEEDED(hr) && Captured() && data) memset(data, 0, size);
+        if (SUCCEEDED(hr) && Captured() && data) {
+            if (size == sizeof(DIJOYSTATE) || size == sizeof(DIJOYSTATE2)) NeutralJoystick(self, size, data);
+            else memset(data, 0, size);                        // keyboard and mouse: nothing pressed, no movement
+        }
         return hr;
     }
     static HRESULT WINAPI Data(void* self, DWORD objSize, LPDIDEVICEOBJECTDATA rgdod, LPDWORD inOut, DWORD flags)

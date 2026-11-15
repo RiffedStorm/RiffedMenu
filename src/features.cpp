@@ -7,6 +7,7 @@
 #include "gps.h"
 #include "hooks.h"
 #include "wheel.h"
+#include "i18n.h"
 #include <windows.h>
 #include <MinHook.h>
 #include <algorithm>
@@ -381,7 +382,10 @@ void Tick()
     last = now;
     static bool noclipWas = false;
     bool noclipDown = (GetAsyncKeyState(g_toggles.noclipKey) & 0x8000) != 0;
-    if (noclipDown && !noclipWas && g_gameFocused) g_toggles.noclip = !g_toggles.noclip;
+    if (noclipDown && !noclipWas && g_gameFocused) {
+        g_toggles.noclip = !g_toggles.noclip;
+        NotifyToggle(T("Noclip"), g_toggles.noclip);
+    }
     noclipWas = noclipDown;
     Game::Noclip(g_toggles.noclip, g_gameFocused ? dt : 0.0f, g_toggles.noclipSpeed);   // dt 0 = hover in place
 

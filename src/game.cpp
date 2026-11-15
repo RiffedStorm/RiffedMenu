@@ -69,7 +69,8 @@ struct Addresses {
 
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
                                       0xB74490, 0xB74494, 0xB6F028, 0xA49960, 0xA8B42C, 0, 0x583530, 0x583480, 0x5E4280,
-                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0, 0xB6EC1C, 0 };
+                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0, 0xB6EC1C, 0,
+                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };   // the rest is not resolved for v1.0
 // Found by disassembly of gta-sa.exe build 459558 (PE timestamp 0x547CD3A3):
 //   0x46EDD0 reads opcode at [ecx+0x14], sets NOT flag [ecx+0xD2], dispatches via table 0x914BB0
 //   0xC100D0 is the base used by 139 sites of `imul r, r, 0x190`

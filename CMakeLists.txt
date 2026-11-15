@@ -44,9 +44,13 @@ add_library(RiffedMenu SHARED
     src/gps.cpp
     src/i18n.cpp
     src/update.cpp
-    src/wheel.cpp)
+    src/wheel.cpp
+    src/theme.cpp
+    src/widgets.cpp
+    src/icons.cpp
+    src/blur.cpp)
 target_link_libraries(RiffedMenu PRIVATE imgui minhook d3d9 dinput8 dxguid dwmapi gdi32 imm32 winhttp shell32)
-target_compile_options(RiffedMenu PRIVATE -Wa,-I${IMGUI_DIR}/misc/fonts -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
+target_compile_options(RiffedMenu PRIVATE -Wa,-I${CMAKE_SOURCE_DIR}/assets/fonts -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 
 # Fully static runtime -> the .asi only depends on system DLLs Wine already ships.
 target_link_options(RiffedMenu PRIVATE -static -static-libgcc -static-libstdc++ -Wl,--enable-stdcall-fixup)

@@ -29,7 +29,8 @@ Press **Insert** in game to open it.
 - **Weapon wheel:** hold a key, point with the mouse, release to equip, scroll to switch between the guns you have collected (remembered per save)
 - **Game fix:** keeps your mouse sensitivity, which the game normally resets to the default
 - **GPS:** the road route to your map marker, drawn on the minimap
-- **Settings:** English or Polish, rebindable keys, multiple named configs with autoload, update notifications
+- **Settings:** English or Polish, rebindable keys, multiple named configs with autoload, update notifications, accent colour presets, animations, optional frosted-glass background
+- **Search:** find any option on any tab from the search box in the menu header (Ctrl+F)
 
 ## Supported game versions
 
@@ -110,4 +111,4 @@ Most features run through the game's own mission-script engine, the same way CLE
 | `src/data.h` | Lists of vehicles, weapons, teleports |
 | `src/gamedata.cpp` | Reads car colours, tuning parts, clothes and skins from the game's own data files |
 
-Text is drawn with the [Roboto](https://fonts.google.com/specimen/Roboto) font (Apache 2.0), built into the `.asi`.
+Text is drawn with the [Inter](https://fonts.google.com/specimen/Inter) and [Barlow Condensed](https://fonts.google.com/specimen/Barlow+Condensed) fonts (SIL Open Font License 1.1), built into the `.asi`. Their licences are in `assets/fonts`.

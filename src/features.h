@@ -104,7 +104,10 @@ struct Toggles {
     int  noclipKey = 0x76;  // VK_F7
 
     float textScale = 1.0f;
-    float opacity   = 0.96f;
+    float opacity   = 1.0f;
+    int   accent    = 0;     // Theme preset: 0 Sunset orange
+    bool  animations = true;
+    bool  blur      = false; // frosted glass behind the menu
     int   language  = 0;    // 0 English, 1 Polish
     bool  updateNotify = true;
     bool  updatePeriodic = true;  // check again every 30 minutes while playing
@@ -140,6 +143,7 @@ void Queue(std::function<void()> fn);   // run on the next game tick
 void Tick();                            // called once per frame from the Present hook
 void InstallStartupHooks();             // hooks that have to be in place before the game initialises
 void NotifyPush(const char* text);      // show a toast from outside the menu
+void NotifyToggle(const char* label, bool on);   // toast with an ON / OFF pill
 void RefreshBody();                     // redraw CJ after fat/muscle changes, as soon as he is on foot
 bool DriveByAiming();                   // the free-look drive-by is running right now
 
