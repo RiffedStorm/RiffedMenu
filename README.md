@@ -37,8 +37,10 @@ Press **Insert** in game to open it.
 | Version | Works |
 |---|---|
 | Steam (2014 re-release, `gta-sa.exe`) | ✅ tested |
-| v1.0 US (`gta_sa.exe`) | ⚠️ should work, untested |
+| v1.0 US (`gta_sa.exe`) | ✅ tested |
 | Definitive Edition | ❌ |
+
+The same `RiffedMenu.asi` works on both: it detects the version when the game starts. On v1.0 the mouse sensitivity fix is skipped, since v1.0 never resets it, and so is the traffic freeze guard, which is only built for the Steam exe.
 
 On any other version the menu still opens, but shows a red warning and changes nothing in the game.
 

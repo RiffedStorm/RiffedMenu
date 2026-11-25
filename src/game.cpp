@@ -67,10 +67,14 @@ struct Addresses {
     uintptr_t cameraInit;         // CCamera::Init (thiscall, no arguments), resets the mouse sensitivity
 };
 
+// v1.0 US (gta_sa.exe, 14,383,616 bytes, PE timestamp 0x427101CA). Each entry was checked against the
+// same code in the Steam exe: matching prologues and field offsets, or the same call/constant pattern.
+// Left out: the traffic-steering guard (that function wasn't located on v1.0, so the Steam patch
+// isn't applied) and the camera-init guard (v1.0's CCamera::Init never touches the mouse sensitivity).
 static const Addresses kV10US     = { 0x469EB0, 0xB7CD98, 0xBA86F0, 0x863984, 0xC97C28, 0xA9B0C8, 0xC8AAB8,
-                                      0xB74490, 0xB74494, 0xB6F028, 0xA49960, 0xA8B42C, 0, 0x583530, 0x583480, 0x5E4280,
-                                      0x73B550, 0x736A50, 0, 0xBA6748, 0x68B7E0, 0xB6EC1C, 0,
-                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };   // the rest is not resolved for v1.0
+                                      0xB74490, 0xB74494, 0xB6F028, 0xA49960, 0xA8B42C, 0xA476AC, 0x583530, 0x583480, 0x5E4280,
+                                      0x73B550, 0x736A50, 0x442D26, 0xBA6748, 0x68B7E0, 0xB6EC1C, 0x8CC534,
+                                      0x73FB10, 0x514970, 0x743C60, 0x5E3B60, 0x6098F0, 0x609560, 0x5407A0, 0x600F70, 0x53FC90, 0x53FD30, 0x61E0C0, 0x62D3DF, 0x5E3990, 0xBA3730, 0xBA372C, 0xB7CB84, 0, 0, 0x56A490, 0x56BA00, 0x5D13E0, 0x5D17B0, 0xC16DB8, 0xC15FC8, 0x5E6320, 0x442E4E, 0x443207, 0 };
 // Found by disassembly of gta-sa.exe build 459558 (PE timestamp 0x547CD3A3):
 //   0x46EDD0 reads opcode at [ecx+0x14], sets NOT flag [ecx+0xD2], dispatches via table 0x914BB0
 //   0xC100D0 is the base used by 139 sites of `imul r, r, 0x190`
