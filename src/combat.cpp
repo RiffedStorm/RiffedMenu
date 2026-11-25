@@ -264,9 +264,13 @@ char __fastcall hkFire(void* weapon, void* edx, void* firedBy, CVector* origin, 
 
     Game::SteadyAim(firedBy);
     int type = *(int*)weapon;
-    float* accuracy = type >= 25 && type <= 27 ? Game::WeaponAccuracy(firedBy, type) : nullptr;      // shotguns: the pellet cone
+    // Shotguns don't hit along a line: the game sweeps a cone from the barrel whose width is 0.05 / accuracy
+    // per metre, and anything inside it is hit. A huge accuracy shrinks that cone to nothing and every pellet
+    // misses, so it's only tightened: 5.0 gives about 13 cm at 10 m, versus 25 to 60 cm for the stock guns.
+    constexpr float kTightShotgun = 5.0f;
+    float* accuracy = type >= 25 && type <= 27 ? Game::WeaponAccuracy(firedBy, type) : nullptr;
     float saved = accuracy ? *accuracy : 0.0f;
-    if (accuracy) *accuracy = 1000000.0f;
+    if (accuracy && saved < kTightShotgun) *accuracy = kTightShotgun;
 
     CVector line;
     bool freeAim = !target && !targetPos && origin && Game::OnCrosshairLine(start ? *start : *origin, line);   // free aim only, a lock-on has its own target
